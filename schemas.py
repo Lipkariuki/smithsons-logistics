@@ -19,7 +19,6 @@ class UserOut(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     role: str
-
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 class Token(BaseModel):
@@ -73,7 +72,6 @@ class OrderOut(BaseModel):
     price_per_case: float
     total_amount: float
     dispatch_note: Optional[str]
-
     model_config = ConfigDict(from_attributes=True)
 
 class AdminOrderOut(BaseModel):
@@ -88,7 +86,6 @@ class AdminOrderOut(BaseModel):
     revenue: float
     trip_id: int
     truck_plate: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 # =========================
@@ -112,7 +109,6 @@ class TripOut(BaseModel):
     driver_name: Optional[str]
     destination: Optional[str]
     created_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
 
 class TripWithDriverVehicleOut(BaseModel):
@@ -124,7 +120,6 @@ class TripWithDriverVehicleOut(BaseModel):
     driver_id: Optional[int] = None
     vehicle_plate: Optional[str] = None
     driver_name: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 class OrderWithTripAndDriverOut(BaseModel):
@@ -135,14 +130,15 @@ class OrderWithTripAndDriverOut(BaseModel):
     date: datetime
     product_type: str
     product_description: Optional[str] = None
-    vehicle_id: int
+    vehicle_id: Optional[int] = None
     destination: str
     cases: int
     price_per_case: float
     total_amount: float
     dispatch_note: Optional[str] = None
     trip: Optional[TripWithDriverVehicleOut]
-
+    expenses: float = 0
+    commission: float = 0
     model_config = ConfigDict(from_attributes=True)
 
 # =========================
@@ -157,7 +153,6 @@ class ExpenseCreate(BaseModel):
 class ExpenseOut(ExpenseCreate):
     id: int
     created_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
 
 # =========================
@@ -174,7 +169,6 @@ class CommissionOut(BaseModel):
     rate_percent: float
     amount_paid: float
     status: str
-
     model_config = ConfigDict(from_attributes=True)
 
 class TripWithExpensesOut(BaseModel):
@@ -188,7 +182,6 @@ class TripWithExpensesOut(BaseModel):
     driver_name: Optional[str] = None
     expenses: List[ExpenseOut] = []
     total_expenses: float
-
     model_config = ConfigDict(from_attributes=True)
 
 class TripWithOrderOut(BaseModel):
@@ -200,5 +193,4 @@ class TripWithOrderOut(BaseModel):
     destination: Optional[str] = None
     total_amount: Optional[float] = None
     vehicle_plate: Optional[str] = None
-
     model_config = ConfigDict(from_attributes=True)

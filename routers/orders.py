@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from datetime import datetime
 from database import get_db
-from models import Order, Trip, Vehicle, User
+from models import Order, Trip, Vehicle, User, Expense, Commission
 from schemas import (
     OrderCreate,
     OrderOut,
@@ -75,8 +77,17 @@ def assign_vehicle(order_id: int, vehicle_id: int, db: Session = Depends(get_db)
 
 
 @router.get("/", response_model=list[OrderWithTripAndDriverOut])
-def get_orders(db: Session = Depends(get_db)):
-    orders = db.query(Order).all()
+def get_orders(month: int = Query(None, ge=1, le=12), db: Session = Depends(get_db)):
+    query = db.query(Order)
+
+    if month:
+        current_year = datetime.utcnow().year
+        query = query.filter(
+            func.extract("month", Order.date) == month,
+            func.extract("year", Order.date) == current_year
+        )
+
+    orders = query.all()
     results = []
 
     for order in orders:
@@ -84,6 +95,15 @@ def get_orders(db: Session = Depends(get_db)):
         if trip:
             vehicle = trip.vehicle
             driver = trip.driver
+
+            # Fetch total expenses
+            expenses_total = db.query(func.sum(Expense.amount)) \
+                .filter(Expense.trip_id == trip.id).scalar() or 0
+
+            # Fetch commission paid
+            commission_row = db.query(Commission).filter(Commission.trip_id == trip.id).first()
+            commission_amount = commission_row.amount_paid if commission_row else 0
+
             enriched_trip = TripWithDriverVehicleOut(
                 id=trip.id,
                 status=trip.status,
@@ -95,6 +115,8 @@ def get_orders(db: Session = Depends(get_db)):
                 driver_name=driver.name if driver else None,
             )
         else:
+            expenses_total = 0
+            commission_amount = 0
             enriched_trip = None
 
         results.append(OrderWithTripAndDriverOut(
@@ -105,13 +127,15 @@ def get_orders(db: Session = Depends(get_db)):
             date=order.date,
             product_type=order.product_type,
             product_description=order.product_description,
-            vehicle_id=None,  # ❌ This does not exist in Order table
+            vehicle_id=None,
             destination=order.destination,
             cases=order.cases,
             price_per_case=order.price_per_case,
             total_amount=order.total_amount,
             dispatch_note=order.dispatch_note,
-            trip=enriched_trip
+            trip=enriched_trip,
+            expenses=expenses_total,
+            commission=commission_amount
         ))
 
     return results
