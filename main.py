@@ -2,6 +2,9 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 from database import Base, engine
 from routers import (
     auth,
@@ -25,8 +28,8 @@ app = FastAPI()
 
 # CORS settings
 origins = [
-    "http://localhost:5173",  # for local frontend dev
-    "https://smithsons-logistics-frontend-production.up.railway.app",  # deployed frontend
+    "http://localhost:5173",
+    "https://smithsons-logistics-frontend-production.up.railway.app",
 ]
 
 app.add_middleware(
@@ -37,7 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routers
+# Include all routers
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(vehicles.router)
@@ -49,7 +52,15 @@ app.include_router(admin.router)
 app.include_router(partner_dashboard.router)
 app.include_router(partner_orders.router)
 
-# Create all tables
+# Auto-create DB tables
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+
+# 👉 Mount React static files (dist/) at root
+app.mount("/", StaticFiles(directory="dist", html=True), name="static")
+
+# 👉 Catch-all route: serves React for unknown paths (after all API routes)
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    return FileResponse("dist/index.html")
