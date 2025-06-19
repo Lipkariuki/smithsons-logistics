@@ -111,6 +111,15 @@ class TripOut(BaseModel):
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
+class TripMinimalOut(BaseModel):
+    id: int
+    vehicle_plate: Optional[str]
+    driver_name: Optional[str]
+    destination: Optional[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TripWithDriverVehicleOut(BaseModel):
     id: int
     status: str
@@ -150,9 +159,13 @@ class ExpenseCreate(BaseModel):
     amount: float
     description: Optional[str] = None
 
-class ExpenseOut(ExpenseCreate):
+class ExpenseOut(BaseModel):
     id: int
-    created_at: datetime
+    amount: float
+    description: Optional[str]
+    timestamp: datetime
+    trip_id: int
+    trip: Optional[TripMinimalOut]
     model_config = ConfigDict(from_attributes=True)
 
 # =========================

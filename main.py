@@ -15,6 +15,7 @@ from routers import (
     expenses,
     commissions,
     admin,
+    driver_trips,
     partner_dashboard,
     partner_orders,
 )
@@ -51,6 +52,8 @@ app.include_router(commissions.router)
 app.include_router(admin.router)
 app.include_router(partner_dashboard.router)
 app.include_router(partner_orders.router)
+app.include_router(driver_trips.router)
+# app.include_router(drivers.router)
 
 # Auto-create DB tables
 @app.on_event("startup")

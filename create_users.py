@@ -87,7 +87,6 @@
 # db.close()
 
 # create_partners.py
-
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from database import SessionLocal
@@ -96,42 +95,42 @@ from models import User
 # Setup password hasher
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Sample owner data
-owners = [
-    {"name": "Moraa Transport", "email": "moraa@example.com", "phone": "0702000001"},
-    {"name": "Jabali Haulage", "email": "jabali@example.com", "phone": "0702000002"},
-    {"name": "Safari Freight", "email": "safari@example.com", "phone": "0702000003"},
+# ✅ Fresh dummy drivers
+drivers = [
+    {"name": "Mark Lewis", "email": "mark.lewis@example.com", "phone": "0703000011"},
+    {"name": "Sandra White", "email": "sandra.white@example.com", "phone": "0703000012"},
+    {"name": "Kevin Smith", "email": "kevin.smith@example.com", "phone": "0703000013"},
 ]
 
 
-def create_owners():
+def create_drivers():
     db: Session = SessionLocal()
 
     try:
-        for owner in owners:
-            existing = db.query(User).filter(
-                User.phone == owner["phone"]).first()
+        for driver in drivers:
+            existing = db.query(User).filter(User.phone == driver["phone"]).first()
             if existing:
-                print(f"⚠️ Owner {owner['name']} already exists.")
+                print(f"⚠️ Driver {driver['name']} already exists.")
                 continue
 
-            new_owner = User(
-                name=owner["name"],
-                email=owner["email"],
-                phone=owner["phone"],
-                password_hash=pwd_context.hash("ownerpass123"),
-                role="owner"
+            new_driver = User(
+                name=driver["name"],
+                email=driver["email"],
+                phone=driver["phone"],
+                password_hash=pwd_context.hash("driverpass123"),
+                role="driver"
             )
-            db.add(new_owner)
+            db.add(new_driver)
 
         db.commit()
-        print("✅ Owner accounts created successfully.")
+        print("✅ Driver accounts created successfully.")
     except Exception as e:
         db.rollback()
-        print("❌ Error creating owner accounts:", str(e))
+        print("❌ Error creating driver accounts:", str(e))
     finally:
         db.close()
 
 
 if __name__ == "__main__":
-    create_owners()
+    create_drivers()
+
