@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: logistics-fastapi-backend
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:10000
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://postgres:kRjxXXjYpWJyFPkVpqPIRCSZAJgRPIwG@postgres.railway.internal:5432/railway
+      - key: SECRET_KEY
+        value: b9AvseoQu0S17sWDZRCa2j22NW-8zObamPnKMARjFkyo423mwow2memRn8945DKJwqgVJaXXrw4jXE7JI8iEfw

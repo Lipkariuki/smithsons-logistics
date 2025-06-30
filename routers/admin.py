@@ -1,15 +1,19 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from database import get_db
 from models import Order, Trip, User, Expense, Commission, Vehicle
 from schemas import AdminOrderOut
+from typing import Optional, List
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-@router.get("/orders", response_model=list[AdminOrderOut])
-def get_admin_orders(db: Session = Depends(get_db)):
-    results = (
+@router.get("/orders", response_model=List[AdminOrderOut])
+def get_admin_orders(
+    month: Optional[int] = Query(None),
+    db: Session = Depends(get_db)
+):
+    query = (
         db.query(
             Order.id,
             Order.invoice_number,
@@ -28,20 +32,23 @@ def get_admin_orders(db: Session = Depends(get_db)):
         .outerjoin(Expense, Expense.trip_id == Trip.id)
         .outerjoin(Commission, Commission.trip_id == Trip.id)
         .outerjoin(Vehicle, Vehicle.id == Trip.vehicle_id)
-        .group_by(
-            Order.id,
-            User.name,
-            Order.invoice_number,
-            Order.product_description,
-            Order.destination,
-            Order.total_amount,
-            Commission.amount_paid,
-            Trip.id,
-            Trip.vehicle_id,
-            Vehicle.plate_number
-        )
-        .all()
     )
+
+    if month:
+        query = query.filter(func.extract("month", Order.date) == month)
+
+    results = query.group_by(
+        Order.id,
+        User.name,
+        Order.invoice_number,
+        Order.product_description,
+        Order.destination,
+        Order.total_amount,
+        Commission.amount_paid,
+        Trip.id,
+        Trip.vehicle_id,
+        Vehicle.plate_number
+    ).all()
 
     admin_orders = []
     for row in results:
