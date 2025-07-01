@@ -1,10 +1,7 @@
-# backend/main.py
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-
 from database import Base, engine
 from routers import (
     auth,
@@ -19,7 +16,6 @@ from routers import (
     partner_dashboard,
     partner_orders,
 )
-
 from dotenv import load_dotenv
 import os
 
@@ -36,13 +32,13 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # 👈 frontend URLs allowed
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ Include all routers
+# ✅ Include all routers BEFORE static files
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(vehicles.router)
@@ -60,7 +56,7 @@ app.include_router(driver_trips.router)
 def startup():
     Base.metadata.create_all(bind=engine)
 
-# ✅ Serve frontend from dist/
+# ✅ Mount static files AFTER routers — prevents catch-all from hijacking API
 if os.path.exists("dist"):
     app.mount("/", StaticFiles(directory="dist", html=True), name="static")
 
