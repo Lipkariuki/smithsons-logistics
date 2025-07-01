@@ -17,6 +17,7 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 @router.post("/", response_model=OrderOut)
 def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     db_order = Order(
+        order_number=order.order_number,
         invoice_number=order.invoice_number,
         purchase_order_number=order.purchase_order_number,
         dispatch_note_number=order.dispatch_note_number,
@@ -96,11 +97,9 @@ def get_orders(month: int = Query(None, ge=1, le=12), db: Session = Depends(get_
             vehicle = trip.vehicle
             driver = trip.driver
 
-            # Fetch total expenses
             expenses_total = db.query(func.sum(Expense.amount)) \
                 .filter(Expense.trip_id == trip.id).scalar() or 0
 
-            # Fetch commission paid
             commission_row = db.query(Commission).filter(Commission.trip_id == trip.id).first()
             commission_amount = commission_row.amount_paid if commission_row else 0
 
@@ -121,6 +120,7 @@ def get_orders(month: int = Query(None, ge=1, le=12), db: Session = Depends(get_
 
         results.append(OrderWithTripAndDriverOut(
             id=order.id,
+            order_number=order.order_number,
             invoice_number=order.invoice_number,
             purchase_order_number=order.purchase_order_number,
             dispatch_note_number=order.dispatch_note_number,

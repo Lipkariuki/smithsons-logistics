@@ -45,6 +45,7 @@ class VehicleOut(VehicleCreate):
 # =========================
 
 class OrderCreate(BaseModel):
+    order_number: str
     invoice_number: str
     purchase_order_number: str
     dispatch_note_number: str
@@ -60,6 +61,7 @@ class OrderCreate(BaseModel):
 
 class OrderOut(BaseModel):
     id: int
+    order_number: str
     invoice_number: str
     purchase_order_number: str
     dispatch_note_number: str

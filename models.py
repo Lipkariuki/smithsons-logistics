@@ -35,10 +35,12 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
+    order_number = Column(String, unique=True, nullable=False)
     invoice_number = Column(String, unique=True, index=True)
     purchase_order_number = Column(String, nullable=True)
     dispatch_note_number = Column(String, nullable=True)
     date = Column(DateTime, default=datetime.utcnow)
+    
 
     # ✅ Product fields
     product_type = Column(String)
