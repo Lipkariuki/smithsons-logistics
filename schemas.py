@@ -86,7 +86,7 @@ class AdminOrderOut(BaseModel):
     expenses: float
     commission: float
     revenue: float
-    trip_id: int
+    trip_id: Optional[int] = None
     truck_plate: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
