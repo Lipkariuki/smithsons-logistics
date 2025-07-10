@@ -67,7 +67,13 @@ def list_trips(db: Session = Depends(get_db)):
 
 @router.get("/{trip_id}/with-expenses", response_model=TripWithExpensesOut)
 def get_trip_with_expenses(trip_id: int, db: Session = Depends(get_db)):
-    trip = db.query(Trip).filter(Trip.id == trip_id).first()
+    trip = db.query(Trip)\
+        .options(
+            joinedload(Trip.vehicle),
+            joinedload(Trip.driver),
+            joinedload(Trip.expenses)
+        ).filter(Trip.id == trip_id).first()
+
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found.")
 
@@ -88,7 +94,6 @@ def get_trip_with_expenses(trip_id: int, db: Session = Depends(get_db)):
         "expenses": expenses,
         "total_expenses": total_expense
     }
-
 
 @router.get("/{trip_id}/profit")
 def get_trip_profit(trip_id: int, db: Session = Depends(get_db)):
