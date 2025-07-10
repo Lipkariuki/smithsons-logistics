@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 
 # =========================
 # USER
@@ -166,7 +166,14 @@ class ExpenseOut(BaseModel):
     description: Optional[str]
     timestamp: datetime
     trip_id: int
-    trip: Optional[TripMinimalOut]
+    model_config = ConfigDict(from_attributes=True)
+
+class SimpleExpenseOut(BaseModel):
+    id: int
+    amount: float
+    description: Optional[str]
+    timestamp: datetime
+    trip_id: int
     model_config = ConfigDict(from_attributes=True)
 
 # =========================
@@ -185,6 +192,10 @@ class CommissionOut(BaseModel):
     status: str
     model_config = ConfigDict(from_attributes=True)
 
+# =========================
+# COMPOSITE TRIP RESPONSE
+# =========================
+
 class TripWithExpensesOut(BaseModel):
     id: int
     status: str
@@ -194,7 +205,7 @@ class TripWithExpensesOut(BaseModel):
     driver_id: Optional[int] = None
     vehicle_plate: Optional[str] = None
     driver_name: Optional[str] = None
-    expenses: List[ExpenseOut] = []
+    expenses: List[SimpleExpenseOut] = []
     total_expenses: float
     model_config = ConfigDict(from_attributes=True)
 
