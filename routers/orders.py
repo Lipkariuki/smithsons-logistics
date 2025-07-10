@@ -29,7 +29,7 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         cases=order.cases,
         price_per_case=order.price_per_case,
         total_amount=order.total_amount,
-        dispatch_note=order.dispatch_note
+        dispatch_note=order.dispatch_note_number
     )
     db.add(db_order)
     db.commit()
