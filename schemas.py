@@ -46,18 +46,17 @@ class VehicleOut(VehicleCreate):
 
 class OrderCreate(BaseModel):
     order_number: str
-    invoice_number: str
-    purchase_order_number: str
-    dispatch_note_number: str
-    product_type: str
-    product_description: Optional[str] = None
-    truck_plate: str
-    destination: str
-    cases: int
-    price_per_case: float
-    total_amount: float
-    date: Optional[datetime] = None
-    dispatch_note: Optional[str] = ""
+    invoice_number: Optional[str] = ""
+    purchase_order_number: Optional[str] = ""
+    dispatch_note_number: Optional[str] = ""
+    date: Optional[date] = None
+    product_type: Optional[str] = ""
+    product_description: Optional[str] = ""
+    truck_plate: Optional[str] = ""
+    destination: Optional[str] = ""
+    cases: Optional[int] = 0
+    price_per_case: Optional[float] = 0
+    total_amount: Optional[float] = 0
 
 class OrderOut(BaseModel):
     id: int
