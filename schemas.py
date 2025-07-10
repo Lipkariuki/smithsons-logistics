@@ -61,7 +61,7 @@ class OrderCreate(BaseModel):
 
 class OrderOut(BaseModel):
     id: int
-    order_number: str
+    order_number: Optional[str] = None
     invoice_number: str
     purchase_order_number: str
     dispatch_note_number: str
@@ -78,7 +78,7 @@ class OrderOut(BaseModel):
 
 class AdminOrderOut(BaseModel):
     id: int
-    order_number: str
+    order_number: Optional[str] = None
     invoice_number: str
     product_description: str
     destination: str
@@ -134,7 +134,7 @@ class TripWithDriverVehicleOut(BaseModel):
 
 class OrderWithTripAndDriverOut(BaseModel):
     id: int
-    order_number: str
+    order_number: Optional[str] = None
     invoice_number: str
     purchase_order_number: str
     dispatch_note_number: str
