@@ -15,6 +15,7 @@ from routers import (
     driver_trips,
     partner_dashboard,
     partner_orders,
+    driver_expense
 )
 from dotenv import load_dotenv
 import os
@@ -50,6 +51,7 @@ app.include_router(admin.router)
 app.include_router(partner_dashboard.router)
 app.include_router(partner_orders.router)
 app.include_router(driver_trips.router)
+app.include_router(driver_expense)
 
 # ✅ Create tables on startup
 @app.on_event("startup")
