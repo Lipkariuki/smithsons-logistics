@@ -16,6 +16,7 @@ def get_admin_orders(
     query = (
         db.query(
             Order.id,
+            Order.order_number,  # ✅
             Order.invoice_number,
             Order.product_description,
             Order.destination,
@@ -39,11 +40,12 @@ def get_admin_orders(
 
     results = query.group_by(
         Order.id,
-        User.name,
+        Order.order_number,  # ✅
         Order.invoice_number,
         Order.product_description,
         Order.destination,
         Order.total_amount,
+        User.name,
         Commission.amount_paid,
         Trip.id,
         Trip.vehicle_id,
@@ -55,6 +57,7 @@ def get_admin_orders(
         revenue = row.total_amount - (row.expenses + row.commission)
         admin_orders.append(AdminOrderOut(
             id=row.id,
+            order_number=row.order_number,  # ✅
             invoice_number=row.invoice_number,
             product_description=row.product_description,
             destination=row.destination,

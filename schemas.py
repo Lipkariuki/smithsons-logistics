@@ -78,6 +78,7 @@ class OrderOut(BaseModel):
 
 class AdminOrderOut(BaseModel):
     id: int
+    order_number: str
     invoice_number: str
     product_description: str
     destination: str
@@ -118,9 +119,7 @@ class TripMinimalOut(BaseModel):
     vehicle_plate: Optional[str]
     driver_name: Optional[str]
     destination: Optional[str]
-
     model_config = ConfigDict(from_attributes=True)
-
 
 class TripWithDriverVehicleOut(BaseModel):
     id: int
@@ -135,6 +134,7 @@ class TripWithDriverVehicleOut(BaseModel):
 
 class OrderWithTripAndDriverOut(BaseModel):
     id: int
+    order_number: str
     invoice_number: str
     purchase_order_number: str
     dispatch_note_number: str
@@ -203,6 +203,7 @@ class TripWithOrderOut(BaseModel):
     trip_id: int
     status: str
     order_id: Optional[int] = None
+    order_number: Optional[str] = None
     invoice_number: Optional[str] = None
     product_description: Optional[str] = None
     destination: Optional[str] = None
