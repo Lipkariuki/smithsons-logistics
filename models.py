@@ -25,6 +25,7 @@ class Vehicle(Base):
     id = Column(Integer, primary_key=True, index=True)
     plate_number = Column(String, unique=True)
     owner_id = Column(Integer, ForeignKey("users.id"))
+    size = Column(String, nullable=True)
 
     owner = relationship("User", back_populates="vehicles")
     trips = relationship("Trip", back_populates="vehicle")

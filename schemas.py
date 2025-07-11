@@ -35,6 +35,7 @@ class TokenData(BaseModel):
 class VehicleCreate(BaseModel):
     plate_number: str
     owner_id: int
+    size: Optional[str] = None
 
 class VehicleOut(VehicleCreate):
     id: int
