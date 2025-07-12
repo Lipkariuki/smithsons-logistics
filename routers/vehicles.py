@@ -12,12 +12,27 @@ def get_vehicles(db: Session = Depends(get_db)):
     return db.query(Vehicle).all()
 
 # ✅ Create new vehicle (with size)
-{
-  "id": 5,
-  "plate_number": "KDA678C",
-  "owner_id": 2,
-  "size": "14T"
-}
+@router.post("/", response_model=VehicleOut)
+def create_vehicle(vehicle: VehicleCreate, db: Session = Depends(get_db)):
+    print("🚛 Incoming vehicle payload:", vehicle)
+
+    existing = db.query(Vehicle).filter(
+        Vehicle.plate_number == vehicle.plate_number).first()
+    if existing:
+        raise HTTPException(
+            status_code=400, detail="Vehicle already exists with this plate number.")
+
+    new_vehicle = Vehicle(
+        plate_number=vehicle.plate_number,
+        owner_id=vehicle.owner_id,
+        size=vehicle.size
+    )
+    print("🔧 Saving vehicle to DB with size:", new_vehicle.size)
+
+    db.add(new_vehicle)
+    db.commit()
+    db.refresh(new_vehicle)
+    return new_vehicle
 
 
 # ✅ Fetch one vehicle by ID (used by frontend on vehicle select)
