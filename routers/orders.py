@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
 from database import get_db
+from utils.rate_lookup import get_rate
 from models import Order, Trip, Vehicle, User, Expense, Commission
 from schemas import (
     OrderCreate,
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 
 @router.post("/", response_model=OrderOut)
 def create_order(order: OrderCreate, db: Session = Depends(get_db)):
+    # Create order
     db_order = Order(
         order_number=order.order_number,
         invoice_number=order.invoice_number,
@@ -35,14 +37,26 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_order)
 
+    # Look up vehicle by plate
     vehicle = db.query(Vehicle).filter(Vehicle.plate_number == order.truck_plate).first()
 
+    # Prepare revenue (owner pay) from rate card
+    rate = 0.0
+    if vehicle:
+        rate = get_rate(
+            destination=order.destination,
+            truck_size=vehicle.size or "",
+            product_type=order.product_type or ""
+        )
+
+    # Auto-create Trip
     db_trip = Trip(
         order_id=db_order.id,
         driver_id=None,
         vehicle_id=vehicle.id if vehicle else None,
         status="started",
-        reimbursement_status="unpaid"
+        reimbursement_status="unpaid",
+        revenue=rate  # ✅ amount to be paid to truck owner
     )
     db.add(db_trip)
     db.commit()

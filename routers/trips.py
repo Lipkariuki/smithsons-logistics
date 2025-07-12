@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Path
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from database import get_db
 from models import Trip, Vehicle, Order, User
 from schemas import TripCreate, TripOut, TripWithExpensesOut
 from typing import List
+from utils.rate_lookup import get_rate
 
 router = APIRouter(prefix="/trips", tags=["Trips"])
 
@@ -22,30 +23,35 @@ def create_trip(trip: TripCreate, db: Session = Depends(get_db)):
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found.")
 
+    # ✅ Get rate based on destination, truck size, product type
+    rate = get_rate(
+        destination=order.destination,
+        truck_size=vehicle.size or "",
+        product_type=order.product_type or ""
+    )
+
     db_trip = Trip(
         vehicle_id=trip.vehicle_id,
         driver_id=trip.driver_id,
         order_id=trip.order_id,
         dispatch_note=trip.dispatch_note,
         status=trip.status or "started",
-        reimbursement_status=trip.reimbursement_status or "unpaid"
+        reimbursement_status=trip.reimbursement_status or "unpaid",
+        revenue=rate  # ✅ amount to be paid to truck owner
     )
+
     db.add(db_trip)
     db.commit()
     db.refresh(db_trip)
     return db_trip
 
 
-from sqlalchemy.orm import joinedload
-
-from sqlalchemy.orm import joinedload
-
 @router.get("/", response_model=List[TripOut])
 def list_trips(db: Session = Depends(get_db)):
     trips = db.query(Trip).options(
         joinedload(Trip.driver),
         joinedload(Trip.vehicle),
-        joinedload(Trip.order)  # This is needed for destination
+        joinedload(Trip.order)
     ).all()
 
     result = []
@@ -62,7 +68,6 @@ def list_trips(db: Session = Depends(get_db)):
         })
 
     return result
-
 
 
 @router.get("/{trip_id}/with-expenses", response_model=TripWithExpensesOut)
@@ -95,6 +100,7 @@ def get_trip_with_expenses(trip_id: int, db: Session = Depends(get_db)):
         "total_expenses": total_expense
     }
 
+
 @router.get("/{trip_id}/profit")
 def get_trip_profit(trip_id: int, db: Session = Depends(get_db)):
     trip = db.query(Trip).filter(Trip.id == trip_id).first()
@@ -107,7 +113,7 @@ def get_trip_profit(trip_id: int, db: Session = Depends(get_db)):
 
     total_expenses = sum(e.amount for e in expenses)
     commission_amount = commission.amount_paid if commission else 0.0
-    revenue = order.total_amount or 0.0
+    revenue = trip.revenue or 0.0  # ✅ use actual revenue saved in trip
 
     net_profit = revenue - total_expenses - commission_amount
 

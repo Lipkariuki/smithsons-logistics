@@ -112,6 +112,7 @@ class TripOut(BaseModel):
     driver_name: Optional[str]
     destination: Optional[str]
     created_at: datetime
+    revenue: Optional[float] = 0.0
     model_config = ConfigDict(from_attributes=True)
 
 class TripMinimalOut(BaseModel):
@@ -130,6 +131,7 @@ class TripWithDriverVehicleOut(BaseModel):
     driver_id: Optional[int] = None
     vehicle_plate: Optional[str] = None
     driver_name: Optional[str] = None
+    revenue: Optional[float] = 0.0
     model_config = ConfigDict(from_attributes=True)
 
 class OrderWithTripAndDriverOut(BaseModel):
