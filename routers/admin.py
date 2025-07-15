@@ -1,3 +1,4 @@
+# Updated FastAPI Admin Route to Use Trip.revenue Instead of Order.total_amount
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
@@ -16,12 +17,12 @@ def get_admin_orders(
     query = (
         db.query(
             Order.id,
-            Order.order_number,  # ✅
+            Order.order_number,
             Order.invoice_number,
             Order.product_description,
             Order.destination,
             User.name.label("driver_name"),
-            Order.total_amount,
+            Trip.revenue.label("trip_revenue"),
             func.coalesce(func.sum(Expense.amount), 0).label("expenses"),
             func.coalesce(Commission.amount_paid, 0).label("commission"),
             Trip.id.label("trip_id"),
@@ -40,11 +41,11 @@ def get_admin_orders(
 
     results = query.group_by(
         Order.id,
-        Order.order_number,  # ✅
+        Order.order_number,
         Order.invoice_number,
         Order.product_description,
         Order.destination,
-        Order.total_amount,
+        Trip.revenue,
         User.name,
         Commission.amount_paid,
         Trip.id,
@@ -54,15 +55,15 @@ def get_admin_orders(
 
     admin_orders = []
     for row in results:
-        revenue = row.total_amount - (row.expenses + row.commission)
+        revenue = (row.trip_revenue or 0) - (row.expenses + row.commission)
         admin_orders.append(AdminOrderOut(
             id=row.id,
-            order_number=row.order_number,  # ✅
+            order_number=row.order_number,
             invoice_number=row.invoice_number,
             product_description=row.product_description,
             destination=row.destination,
             driver_name=row.driver_name or "Unassigned",
-            total_amount=row.total_amount,
+            total_amount=row.trip_revenue or 0,
             expenses=row.expenses,
             commission=row.commission,
             revenue=revenue,

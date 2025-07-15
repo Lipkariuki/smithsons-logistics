@@ -50,7 +50,7 @@ class OrderCreate(BaseModel):
     invoice_number: Optional[str] = ""
     purchase_order_number: Optional[str] = ""
     dispatch_note_number: Optional[str] = ""
-    date: Optional[date] = None
+    date: date  # required
     product_type: Optional[str] = ""
     product_description: Optional[str] = ""
     truck_plate: Optional[str] = ""

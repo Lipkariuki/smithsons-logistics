@@ -71,7 +71,7 @@ class Trip(Base):
     status = Column(Enum("started", "completed", "cancelled", name="trip_status"), default="started")
     reimbursement_status = Column(Enum("paid", "unpaid", name="reimbursement_status"), default="unpaid")
     dispatch_note = Column(Text, nullable=True)
-    revenue = Column(Float, default=0.0)
+    revenue = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     vehicle = relationship("Vehicle", back_populates="trips")
