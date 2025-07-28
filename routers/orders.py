@@ -4,6 +4,7 @@ from sqlalchemy import func
 from datetime import datetime
 from database import get_db
 from utils.rate_lookup import get_rate
+from utils.sms import send_sms  # ✅ Add this
 from models import Order, Trip, Vehicle, User, Expense, Commission
 from schemas import (
     OrderCreate,
@@ -56,10 +57,30 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         vehicle_id=vehicle.id if vehicle else None,
         status="started",
         reimbursement_status="unpaid",
-        revenue=rate  # ✅ amount to be paid to truck owner
+        revenue=rate
     )
     db.add(db_trip)
     db.commit()
+
+    # ✅ Send SMS if vehicle and owner found
+    if vehicle:
+        owner = db.query(User).filter(User.id == vehicle.owner_id).first()
+        driver = db.query(User).filter(User.id == db_trip.driver_id).first() if db_trip.driver_id else None
+
+        message = (
+            f"🚛 New Trip Assigned\n"
+            f"Order #{order.order_number} to {order.destination}\n"
+            f"Truck: {vehicle.plate_number}"
+        )
+
+        recipients = []
+        if owner and owner.phone:
+            recipients.append(owner.phone)
+        if driver and driver.phone:
+            recipients.append(driver.phone)
+
+        if recipients:
+            send_sms(recipients, message)
 
     return db_order
 
