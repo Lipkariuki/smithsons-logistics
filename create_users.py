@@ -146,18 +146,18 @@ def create_admin():
     db: Session = SessionLocal()
 
     try:
-        new_phone = "+254756760992"
+        new_phone = "+254722760992"
         existing_admin = db.query(User).filter(User.phone == new_phone).first()
         if existing_admin:
             print(f"⚠️ Admin with phone {new_phone} already exists.")
             return
 
         new_admin = User(
-            name="Phil driver",
-            email="philqari@gmail.com",
+            name="PHIL test",
+            email="philqaris@gmail.com",
             phone=new_phone,
             password_hash=pwd_context.hash("adminpass456"),
-            role="driver"
+            role="owner"
         )
         db.add(new_admin)
         db.commit()

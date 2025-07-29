@@ -18,7 +18,9 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 
 @router.post("/", response_model=OrderOut)
 def create_order(order: OrderCreate, db: Session = Depends(get_db)):
+
     # Create order
+    calculated_total = (order.cases or 0) * (order.price_per_case or 0.0)
     db_order = Order(
         order_number=order.order_number,
         invoice_number=order.invoice_number,
@@ -31,7 +33,7 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         destination=order.destination,
         cases=order.cases,
         price_per_case=order.price_per_case,
-        total_amount=order.total_amount,
+        total_amount=calculated_total,
         dispatch_note=order.dispatch_note_number
     )
     db.add(db_order)

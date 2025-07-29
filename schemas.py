@@ -57,7 +57,7 @@ class OrderCreate(BaseModel):
     destination: Optional[str] = ""
     cases: Optional[int] = 0
     price_per_case: Optional[float] = 0
-    total_amount: Optional[float] = 0
+    #total_amount: Optional[float] = 0
 
 class OrderOut(BaseModel):
     id: int
@@ -113,6 +113,7 @@ class TripOut(BaseModel):
     destination: Optional[str]
     created_at: datetime
     revenue: Optional[float] = 0.0
+    order_number: Optional[str]
     model_config = ConfigDict(from_attributes=True)
 
 class TripMinimalOut(BaseModel):
