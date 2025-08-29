@@ -8,7 +8,6 @@ from utils.rate_lookup import get_rate
 
 router = APIRouter(prefix="/trips", tags=["Trips"])
 
-
 @router.post("/", response_model=TripOut)
 def create_trip(trip: TripCreate, db: Session = Depends(get_db)):
     vehicle = db.query(Vehicle).filter(Vehicle.id == trip.vehicle_id).first()
@@ -23,7 +22,6 @@ def create_trip(trip: TripCreate, db: Session = Depends(get_db)):
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found.")
 
-    # ✅ Get rate based on destination, truck size, product type
     rate = get_rate(
         destination=order.destination,
         truck_size=vehicle.size or "",
@@ -37,14 +35,13 @@ def create_trip(trip: TripCreate, db: Session = Depends(get_db)):
         dispatch_note=trip.dispatch_note,
         status=trip.status or "started",
         reimbursement_status=trip.reimbursement_status or "unpaid",
-        revenue=rate  # ✅ amount to be paid to truck owner
+        revenue=rate
     )
 
     db.add(db_trip)
     db.commit()
     db.refresh(db_trip)
     return db_trip
-
 
 @router.get("/", response_model=List[TripOut])
 def list_trips(db: Session = Depends(get_db)):
@@ -64,11 +61,11 @@ def list_trips(db: Session = Depends(get_db)):
             "vehicle_plate": trip.vehicle.plate_number if trip.vehicle else None,
             "driver_name": trip.driver.name if trip.driver else None,
             "destination": trip.order.destination if trip.order else None,
+            "order_number": trip.order.order_number if trip.order else None,  # ✅ added here
             "created_at": trip.created_at,
         })
 
     return result
-
 
 @router.get("/{trip_id}/with-expenses", response_model=TripWithExpensesOut)
 def get_trip_with_expenses(trip_id: int, db: Session = Depends(get_db)):
@@ -100,7 +97,6 @@ def get_trip_with_expenses(trip_id: int, db: Session = Depends(get_db)):
         "total_expenses": total_expense
     }
 
-
 @router.get("/{trip_id}/profit")
 def get_trip_profit(trip_id: int, db: Session = Depends(get_db)):
     trip = db.query(Trip).filter(Trip.id == trip_id).first()
@@ -113,7 +109,7 @@ def get_trip_profit(trip_id: int, db: Session = Depends(get_db)):
 
     total_expenses = sum(e.amount for e in expenses)
     commission_amount = commission.amount_paid if commission else 0.0
-    revenue = trip.revenue or 0.0  # ✅ use actual revenue saved in trip
+    revenue = trip.revenue or 0.0
 
     net_profit = revenue - total_expenses - commission_amount
 

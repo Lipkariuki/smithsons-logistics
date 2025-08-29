@@ -113,7 +113,7 @@ class TripOut(BaseModel):
     destination: Optional[str]
     created_at: datetime
     revenue: Optional[float] = 0.0
-    order_number: Optional[str]
+    order_number: Optional[str] = None  
     model_config = ConfigDict(from_attributes=True)
 
 class TripMinimalOut(BaseModel):
