@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from database import Base, engine
+from database import Base, engine, SessionLocal
+from sqlalchemy import text
 from routers import (
     auth,
     users,
@@ -61,6 +62,27 @@ app.include_router(metadata.router)
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    # One-time normalization: convert blank optional fields to NULL
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE orders
+                SET invoice_number = NULL
+                WHERE invoice_number IS NOT NULL AND TRIM(invoice_number) = '';
+            """))
+            conn.execute(text("""
+                UPDATE orders
+                SET purchase_order_number = NULL
+                WHERE purchase_order_number IS NOT NULL AND TRIM(purchase_order_number) = '';
+            """))
+            conn.execute(text("""
+                UPDATE orders
+                SET dispatch_note_number = NULL
+                WHERE dispatch_note_number IS NOT NULL AND TRIM(dispatch_note_number) = '';
+            """))
+    except Exception:
+        # Avoid blocking app startup if cleanup fails; logs are visible in platform
+        pass
 
 # ✅ Mount static files AFTER routers — prevents catch-all from hijacking API
 if os.path.exists("dist"):
