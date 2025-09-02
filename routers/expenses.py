@@ -39,10 +39,12 @@ def get_expenses(db: Session = Depends(get_db)):
         trip = exp.trip
         vehicle_plate = trip.vehicle.plate_number if trip and trip.vehicle else None
         destination = trip.order.destination if trip and trip.order else None
+        order_number = trip.order.order_number if trip and trip.order else None
 
         results.append({
             "id": exp.id,
             "trip_id": exp.trip_id,
+            "order_number": order_number,
             "vehicle_plate": vehicle_plate,
             "destination": destination,
             "amount": exp.amount,
