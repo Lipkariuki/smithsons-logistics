@@ -80,6 +80,11 @@ def startup():
                 SET dispatch_note_number = NULL
                 WHERE dispatch_note_number IS NOT NULL AND TRIM(dispatch_note_number) = '';
             """))
+            conn.execute(text("""
+                UPDATE orders
+                SET order_number = 'ORD-' || id
+                WHERE TRIM(order_number) = ''
+            """))
     except Exception:
         # Avoid blocking app startup if cleanup fails; logs are visible in platform
         pass
