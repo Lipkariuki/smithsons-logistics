@@ -42,6 +42,9 @@ def normalize_ke_phone(phone: Optional[str]) -> Optional[str]:
         return "+" + p
     if p.startswith("0") and len(p) == 10:
         return "+254" + p[1:]
+    # Handle common spreadsheet case: 9-digit number starting with 7 (missing leading 0)
+    if len(p) == 9 and p.startswith("7"):
+        return "+254" + p
     return p
 
 
@@ -49,6 +52,13 @@ def tonnage_to_size(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     raw = value.strip().upper()
+    if not raw:
+        return None
+    # Preserve known labels
+    if "VAN" in raw:
+        return "VAN"
+    if "PICKUP" in raw:
+        return "PICKUP"
     # Try numeric extract
     num = ""
     for ch in raw:
@@ -60,19 +70,13 @@ def tonnage_to_size(value: Optional[str]) -> Optional[str]:
         t = None
 
     if t is not None:
-        if t <= 3.5:
-            return "3T"
-        if t <= 5.5:
-            return "5T"
-        if t <= 7.6:
-            return "7T"
-        if t <= 10.5:
-            return "10T"
-        if t <= 15.5:
-            return "15T"
-        return f"{int(t)}T"
+        # Normalize to exact label like '14T' or '7.5T'
+        if abs(t - int(t)) < 1e-6:
+            return f"{int(t)}T"
+        return f"{t}T"
 
     # Fallback to label cleanup (e.g., 'PICKUP', 'VAN')
+    # Fallback: return cleaned raw (e.g., '14 TONNES' -> '14 TONNES')
     return raw
 
 
@@ -173,6 +177,7 @@ def main():
     parser.add_argument("--drivers", help="CSV path for drivers", default=None)
     parser.add_argument("--default_owner_password", help="Default password for owners", default="ownerpass123")
     parser.add_argument("--default_driver_password", help="Default password for drivers", default="driverpass123")
+    parser.add_argument("--seed_dummy_drivers", type=int, default=0, help="Seed N dummy drivers if drivers CSV not supplied")
     args = parser.parse_args()
 
     if not args.owners_vehicles and not args.drivers:
@@ -180,6 +185,24 @@ def main():
         return
 
     run_import(args.owners_vehicles, args.drivers, args.default_owner_password, args.default_driver_password)
+
+    # Optional: seed dummy drivers
+    if args.seed_dummy_drivers and not args.drivers:
+        db: Session = SessionLocal()
+        try:
+            base = 710000001
+            for i in range(args.seed_dummy_drivers):
+                phone = f"+254{base + i:09d}"[-13:]  # ensure +2547XXXXXXXX format
+                existing = db.query(User).filter(User.phone == phone).first()
+                if existing:
+                    continue
+                name = f"Driver {i+1:03d}"
+                user = User(name=name, phone=phone, role="driver", password_hash=pwd_context.hash("driverpass123"))
+                db.add(user)
+            db.commit()
+            print(f"✅ Seeded {args.seed_dummy_drivers} dummy drivers (where not existing)")
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

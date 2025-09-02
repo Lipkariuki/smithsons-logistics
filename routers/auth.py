@@ -59,6 +59,8 @@ def normalize_ke_phone(phone: str | None) -> str | None:
         return "+" + p
     if p.startswith("0") and len(p) == 10:
         return "+254" + p[1:]
+    if len(p) == 9 and p.startswith("7"):
+        return "+254" + p
     return p
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
