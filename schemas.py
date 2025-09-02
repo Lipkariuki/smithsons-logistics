@@ -62,18 +62,18 @@ class OrderCreate(BaseModel):
 class OrderOut(BaseModel):
     id: int
     order_number: Optional[str] = None
-    invoice_number: str
-    purchase_order_number: str
-    dispatch_note_number: str
+    invoice_number: Optional[str] = ""
+    purchase_order_number: Optional[str] = ""
+    dispatch_note_number: Optional[str] = ""
     date: Optional[datetime] = None
-    product_type: str
-    product_description: Optional[str]
-    truck_plate: str
-    destination: str
-    cases: int
-    price_per_case: float
-    total_amount: float
-    dispatch_note: Optional[str]
+    product_type: Optional[str] = ""
+    product_description: Optional[str] = ""
+    truck_plate: Optional[str] = ""
+    destination: Optional[str] = ""
+    cases: Optional[int] = 0
+    price_per_case: Optional[float] = 0.0
+    total_amount: Optional[float] = 0.0
+    dispatch_note: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class AdminOrderOut(BaseModel):
