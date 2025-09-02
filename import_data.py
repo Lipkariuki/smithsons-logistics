@@ -20,6 +20,7 @@ Notes:
 
 import argparse
 import csv
+import re
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -96,7 +97,8 @@ def upsert_owner_and_vehicle(db: Session, owner_name: str, owner_phone: str, own
     # Derive size
     size = tonnage_to_size(tonnage) or (size_label.strip().upper() if size_label else None)
 
-    plate_norm = plate.strip().upper()
+    # Normalize plate: uppercase and remove inner spaces
+    plate_norm = re.sub(r"\s+", "", plate.strip().upper())
     vehicle = db.query(Vehicle).filter(Vehicle.plate_number == plate_norm).first()
     if vehicle:
         vehicle.owner_id = owner.id
@@ -182,4 +184,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
