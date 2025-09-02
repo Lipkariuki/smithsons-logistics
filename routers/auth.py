@@ -4,6 +4,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -48,6 +49,18 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     return encoded
 
 
+def normalize_ke_phone(phone: str | None) -> str | None:
+    if not phone:
+        return None
+    p = phone.strip().replace(" ", "").replace("-", "")
+    if p.startswith("+254"):
+        return p
+    if p.startswith("254"):
+        return "+" + p
+    if p.startswith("0") and len(p) == 10:
+        return "+254" + p[1:]
+    return p
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     print("🪪 Received token:", token)  # Debug incoming token
 
@@ -87,7 +100,18 @@ def require_role(role: str):
 
 @router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.phone == form_data.username).first()  # ✅ FIXED TYPO HERE
+    raw = form_data.username
+    normalized = normalize_ke_phone(raw)
+    user = (
+        db.query(User)
+        .filter(
+            or_(
+                User.phone == raw,
+                User.phone == normalized
+            )
+        )
+        .first()
+    )
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
