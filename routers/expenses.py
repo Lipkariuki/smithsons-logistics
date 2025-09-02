@@ -2,14 +2,29 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from database import get_db
-from models import Expense
+from models import Expense, Trip, Order
 from schemas import ExpenseCreate, ExpenseOut
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
 
 @router.post("/", response_model=ExpenseOut)
 def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db)):
-    db_expense = Expense(**expense.dict())
+    # Accept either trip_id or order_number; require at least one
+    trip_id = expense.trip_id
+
+    if not trip_id and expense.order_number:
+        order = db.query(Order).filter(Order.order_number == expense.order_number).first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found for given order_number")
+        trip = db.query(Trip).filter(Trip.order_id == order.id).first()
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found for the given order")
+        trip_id = trip.id
+
+    if not trip_id:
+        raise HTTPException(status_code=400, detail="Provide trip_id or order_number")
+
+    db_expense = Expense(trip_id=trip_id, amount=expense.amount, description=expense.description)
     db.add(db_expense)
     db.commit()
     db.refresh(db_expense)

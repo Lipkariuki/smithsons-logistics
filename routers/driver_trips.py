@@ -81,6 +81,9 @@ def add_driver_expense(
         raise HTTPException(status_code=403, detail="Only drivers can submit expenses.")
 
     # Check trip exists and belongs to driver
+    if not expense.trip_id:
+        raise HTTPException(status_code=400, detail="Drivers must provide trip_id for expenses.")
+
     trip = (
         db.query(Trip)
         .filter(Trip.id == expense.trip_id, Trip.driver_id == current_user.id)

@@ -165,7 +165,8 @@ class OrderWithTripAndDriverOut(BaseModel):
 # =========================
 
 class ExpenseCreate(BaseModel):
-    trip_id: int
+    trip_id: Optional[int] = None
+    order_number: Optional[str] = None
     amount: float
     description: Optional[str] = None
 
