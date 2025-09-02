@@ -19,22 +19,29 @@ router = APIRouter(prefix="/orders", tags=["Orders"])
 @router.post("/", response_model=OrderOut)
 def create_order(order: OrderCreate, db: Session = Depends(get_db)):
 
+    # Normalize optional string fields: map empty strings to None to avoid unique '' collisions
+    def none_if_blank(value: str | None):
+        if value is None:
+            return None
+        value = value.strip()
+        return value if value else None
+
     # Create order
     calculated_total = (order.cases or 0) * (order.price_per_case or 0.0)
     db_order = Order(
         order_number=order.order_number,
-        invoice_number=order.invoice_number,
-        purchase_order_number=order.purchase_order_number,
-        dispatch_note_number=order.dispatch_note_number,
+        invoice_number=none_if_blank(order.invoice_number),
+        purchase_order_number=none_if_blank(order.purchase_order_number),
+        dispatch_note_number=none_if_blank(order.dispatch_note_number),
         date=order.date,
         product_type=order.product_type,
-        product_description=order.product_description,
+        product_description=none_if_blank(order.product_description),
         truck_plate=order.truck_plate,
         destination=order.destination,
         cases=order.cases,
         price_per_case=order.price_per_case,
         total_amount=calculated_total,
-        dispatch_note=order.dispatch_note_number
+        dispatch_note=none_if_blank(order.dispatch_note_number)
     )
     db.add(db_order)
     db.commit()
