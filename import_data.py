@@ -86,6 +86,7 @@ def upsert_owner_and_vehicle(db: Session, owner_name: str, owner_phone: str, own
         print(f"[SKIP] Missing owner phone for plate {plate}")
         return
 
+    # Only create owner if missing; do not update existing for now
     owner = db.query(User).filter(User.phone == phone).first()
     if not owner:
         owner = User(
@@ -105,9 +106,8 @@ def upsert_owner_and_vehicle(db: Session, owner_name: str, owner_phone: str, own
     plate_norm = re.sub(r"\s+", "", plate.strip().upper())
     vehicle = db.query(Vehicle).filter(Vehicle.plate_number == plate_norm).first()
     if vehicle:
-        vehicle.owner_id = owner.id
-        if size:
-            vehicle.size = size
+        # Do not modify existing vehicles (owner/size) to avoid unintended changes
+        return
     else:
         vehicle = Vehicle(plate_number=plate_norm, owner_id=owner.id, size=size)
         db.add(vehicle)
