@@ -79,10 +79,10 @@ class OrderOut(BaseModel):
 class AdminOrderOut(BaseModel):
     id: int
     order_number: Optional[str] = None
-    invoice_number: str
+    invoice_number: Optional[str] = ""
     # include order date for filtering/sorting on frontend
     date: Optional[datetime] = None
-    product_description: str
+    product_description: Optional[str] = ""
     destination: str
     driver_name: str
     # ids used by filters on frontend
