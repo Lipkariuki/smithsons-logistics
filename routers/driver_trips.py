@@ -38,6 +38,7 @@ def get_my_trips(
         "vehicle_plate": trip.vehicle.plate_number if trip.vehicle else None,
         "driver_name": current_user.name,
         "destination": trip.order.destination if trip.order else None,
+        "order_number": trip.order.order_number if trip.order else None,
         "created_at": trip.created_at,
     } for trip in trips]
 
