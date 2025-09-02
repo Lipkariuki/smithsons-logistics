@@ -80,9 +80,14 @@ class AdminOrderOut(BaseModel):
     id: int
     order_number: Optional[str] = None
     invoice_number: str
+    # include order date for filtering/sorting on frontend
+    date: Optional[datetime] = None
     product_description: str
     destination: str
     driver_name: str
+    # ids used by filters on frontend
+    driver_id: Optional[int] = None
+    owner_id: Optional[int] = None
     total_amount: float
     expenses: float
     commission: float

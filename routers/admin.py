@@ -19,15 +19,18 @@ def get_admin_orders(
             Order.id,
             Order.order_number,
             Order.invoice_number,
+            Order.date,
             Order.product_description,
             Order.destination,
             User.name.label("driver_name"),
+            Trip.driver_id,
             Trip.revenue.label("trip_revenue"),
             func.coalesce(func.sum(Expense.amount), 0).label("expenses"),
             func.coalesce(Commission.amount_paid, 0).label("commission"),
             Trip.id.label("trip_id"),
             Trip.vehicle_id,
-            Vehicle.plate_number.label("truck_plate")
+            Vehicle.plate_number.label("truck_plate"),
+            Vehicle.owner_id,
         )
         .outerjoin(Trip, Trip.order_id == Order.id)
         .outerjoin(User, User.id == Trip.driver_id)
@@ -43,14 +46,17 @@ def get_admin_orders(
         Order.id,
         Order.order_number,
         Order.invoice_number,
+        Order.date,
         Order.product_description,
         Order.destination,
         Trip.revenue,
         User.name,
+        Trip.driver_id,
         Commission.amount_paid,
         Trip.id,
         Trip.vehicle_id,
-        Vehicle.plate_number
+        Vehicle.plate_number,
+        Vehicle.owner_id,
     ).all()
 
     admin_orders = []
@@ -60,9 +66,12 @@ def get_admin_orders(
             id=row.id,
             order_number=row.order_number,
             invoice_number=row.invoice_number,
+            date=row.date,
             product_description=row.product_description,
             destination=row.destination,
             driver_name=row.driver_name or "Unassigned",
+            driver_id=row.driver_id,
+            owner_id=row.owner_id,
             total_amount=row.trip_revenue or 0,
             expenses=row.expenses,
             commission=row.commission,
