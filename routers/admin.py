@@ -12,6 +12,8 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 @router.get("/orders", response_model=List[AdminOrderOut])
 def get_admin_orders(
     month: Optional[int] = Query(None),
+    search: Optional[str] = Query(None, description="Filter by order_number, invoice_number, or destination (ILIKE)"),
+    limit: Optional[int] = Query(50, ge=1, le=200, description="Max results when using search"),
     db: Session = Depends(get_db)
 ):
     query = (
@@ -42,7 +44,15 @@ def get_admin_orders(
     if month:
         query = query.filter(func.extract("month", Order.date) == month)
 
-    results = query.group_by(
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            (Order.order_number.ilike(pattern)) |
+            (Order.invoice_number.ilike(pattern)) |
+            (Order.destination.ilike(pattern))
+        )
+
+    query = query.group_by(
         Order.id,
         Order.order_number,
         Order.invoice_number,
@@ -57,7 +67,12 @@ def get_admin_orders(
         Trip.vehicle_id,
         Vehicle.plate_number,
         Vehicle.owner_id,
-    ).all()
+    )
+
+    if search:
+        query = query.order_by(Order.date.desc()).limit(limit)
+
+    results = query.all()
 
     admin_orders = []
     for row in results:
