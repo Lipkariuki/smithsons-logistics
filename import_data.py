@@ -120,10 +120,12 @@ def upsert_driver(db: Session, name: str, phone: str, email: Optional[str], pass
         return
     user = db.query(User).filter(User.phone == phone_n).first()
     if user:
-        # Update basic fields if changed; keep role as driver
-        user.name = name or user.name
-        user.email = email or user.email
-        user.role = "driver"
+        # If user already a driver, update metadata; otherwise, do not change role to avoid overwriting owners
+        if user.role == "driver":
+            user.name = name or user.name
+            user.email = email or user.email
+        else:
+            print(f"[SKIP] Phone already in use by {user.role}: {phone_n} ({user.name})")
         return
     pw = password or default_driver_password
     new_driver = User(name=name, email=email, phone=phone_n, password_hash=pwd_context.hash(pw), role="driver")
