@@ -30,6 +30,34 @@ def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db)):
     db.refresh(db_expense)
     return db_expense
 
+
+@router.patch("/{expense_id}", response_model=ExpenseOut)
+def update_expense(expense_id: int, payload: dict, db: Session = Depends(get_db)):
+    exp = db.query(Expense).filter(Expense.id == expense_id).first()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    # Allowed fields: amount, description
+    if "amount" in payload:
+        try:
+            exp.amount = float(payload["amount"]) if payload["amount"] is not None else exp.amount
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid amount")
+    if "description" in payload:
+        exp.description = payload["description"]
+    db.commit()
+    db.refresh(exp)
+    return exp
+
+
+@router.delete("/{expense_id}")
+def delete_expense(expense_id: int, db: Session = Depends(get_db)):
+    exp = db.query(Expense).filter(Expense.id == expense_id).first()
+    if not exp:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    db.delete(exp)
+    db.commit()
+    return {"status": "deleted"}
+
 @router.get("/")
 def get_expenses(db: Session = Depends(get_db)):
     expenses = db.query(Expense).all()

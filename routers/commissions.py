@@ -20,7 +20,9 @@ def create_commission(commission: CommissionCreate, db: Session = Depends(get_db
     if not order:
         raise HTTPException(status_code=404, detail="Order not found for this trip")
 
-    amount_paid = (commission.rate_percent / 100) * order.total_amount
+    # Prefer trip revenue if available, fallback to order total_amount
+    base_amount = trip.revenue if trip.revenue is not None else order.total_amount or 0.0
+    amount_paid = (commission.rate_percent / 100) * base_amount
 
     db_commission = Commission(
         trip_id=commission.trip_id,
@@ -74,7 +76,8 @@ def update_or_create_commission(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found for this trip")
 
-    amount_paid = (rate_percent / 100) * order.total_amount
+    base_amount = trip.revenue if trip.revenue is not None else order.total_amount or 0.0
+    amount_paid = (rate_percent / 100) * base_amount
 
     commission = db.query(Commission).filter(Commission.trip_id == trip_id).first()
 
