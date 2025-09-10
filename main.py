@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from database import Base, engine, SessionLocal
+from database import Base, engine
 from sqlalchemy import text
 from routers import (
     auth,
@@ -58,66 +58,35 @@ app.include_router(rates.router, tags=["Rates"])
 app.include_router(driver_expense.router)
 app.include_router(metadata.router)
 
-def _maybe_auto_migrate_and_normalize():
-    do_migrate = os.getenv("AUTO_MIGRATE", "false").lower() in ("1", "true", "yes")
-    if not do_migrate:
-        return
-    Base.metadata.create_all(bind=engine)
-    with engine.begin() as conn:
-        conn.execute(text("""
-            UPDATE orders
-            SET invoice_number = NULL
-            WHERE invoice_number IS NOT NULL AND TRIM(invoice_number) = '';
-        """))
-        conn.execute(text("""
-            UPDATE orders
-            SET purchase_order_number = NULL
-            WHERE purchase_order_number IS NOT NULL AND TRIM(purchase_order_number) = '';
-        """))
-        conn.execute(text("""
-            UPDATE orders
-            SET dispatch_note_number = NULL
-            WHERE dispatch_note_number IS NOT NULL AND TRIM(dispatch_note_number) = '';
-        """))
-        conn.execute(text("""
-            UPDATE orders
-            SET order_number = 'ORD-' || id
-            WHERE TRIM(order_number) = ''
-        """))
-
-
 @app.on_event("startup")
 def startup():
-    # Try DB up to N times in case of cold start or brief outages
-    retries = int(os.getenv("DB_CONNECT_RETRIES", "5"))
-    delay = float(os.getenv("DB_CONNECT_BACKOFF", "1.5"))
-    import time
-    for i in range(retries):
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            break
-        except Exception as e:
-            if i == retries - 1:
-                # Re-raise on final attempt so platform logs show startup failure
-                raise
-            time.sleep(delay * (i + 1))
+    Base.metadata.create_all(bind=engine)
+    # One-time normalization: convert blank optional fields to NULL
     try:
-        _maybe_auto_migrate_and_normalize()
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE orders
+                SET invoice_number = NULL
+                WHERE invoice_number IS NOT NULL AND TRIM(invoice_number) = '';
+            """))
+            conn.execute(text("""
+                UPDATE orders
+                SET purchase_order_number = NULL
+                WHERE purchase_order_number IS NOT NULL AND TRIM(purchase_order_number) = '';
+            """))
+            conn.execute(text("""
+                UPDATE orders
+                SET dispatch_note_number = NULL
+                WHERE dispatch_note_number IS NOT NULL AND TRIM(dispatch_note_number) = '';
+            """))
+            conn.execute(text("""
+                UPDATE orders
+                SET order_number = 'ORD-' || id
+                WHERE TRIM(order_number) = ''
+            """))
     except Exception:
-        # Avoid blocking app if optional migration fails; logs visible in platform
+        # Avoid blocking app startup if cleanup fails; logs are visible in platform
         pass
-
-
-@app.get("/healthz")
-def healthz():
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return {"status": "ok"}
-    except Exception as e:
-        from fastapi import Response
-        return Response(content=f"db error: {e}", status_code=503)
 
 # ✅ Mount static files AFTER routers — prevents catch-all from hijacking API
 if os.path.exists("dist"):
