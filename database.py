@@ -6,11 +6,23 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 def _build_database_url() -> str:
     # Prefer env vars
-    url = (
+    raw = (
         os.getenv("DATABASE_URL")
         or os.getenv("SQLALCHEMY_DATABASE_URL")
         or ""
     )
+    # If env contains accidental concatenations, keep only the last DSN occurrence
+    url = raw.strip()
+    if url and ("postgresql://" in url or "postgres://" in url or "postgresql+psycopg://" in url):
+        candidates = [
+            url.rfind("postgresql+psycopg://"),
+            url.rfind("postgresql://"),
+            url.rfind("postgres://"),
+        ]
+        start = max(candidates)
+        if start > 0:
+            url = url[start:]
+
     if not url:
         # Fallback to previous dev default (not recommended for prod)
         url = "postgresql+psycopg://postgres:password@localhost:5432/postgres"

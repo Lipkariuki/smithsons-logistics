@@ -108,6 +108,17 @@ def startup():
         # Avoid blocking app if optional migration fails; logs visible in platform
         pass
 
+
+@app.get("/healthz")
+def healthz():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception as e:
+        from fastapi import Response
+        return Response(content=f"db error: {e}", status_code=503)
+
 # ✅ Mount static files AFTER routers — prevents catch-all from hijacking API
 if os.path.exists("dist"):
     app.mount("/", StaticFiles(directory="dist", html=True), name="static")
