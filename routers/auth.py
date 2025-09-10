@@ -23,7 +23,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 # ✅ JWT Config
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "default_if_missing")
-print("✅ Loaded SECRET_KEY:", SECRET_KEY)  # Debug print
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -45,7 +44,6 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     encoded = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    print("✅ Created JWT payload:", to_encode)  # Debug JWT creation
     return encoded
 
 
@@ -64,7 +62,6 @@ def normalize_ke_phone(phone: str | None) -> str | None:
     return p
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    print("🪪 Received token:", token)  # Debug incoming token
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -74,21 +71,15 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        print("✅ Decoded JWT payload:", payload)  # Debug decoded token
         user_id: str = payload.get("sub")
         if user_id is None:
-            print("❌ Token missing 'sub' field")
             raise credentials_exception
-    except JWTError as e:
-        print("❌ JWT decoding error:", str(e))  # Debug JWT errors
+    except JWTError:
         raise credentials_exception
 
     user = db.query(User).filter(User.id == int(user_id)).first()
     if user is None:
-        print("❌ No user found with ID:", user_id)
         raise credentials_exception
-
-    print("✅ Authenticated user:", user.name, "| Role:", user.role)
     return user
 
 
