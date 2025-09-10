@@ -16,6 +16,18 @@ def get_admin_orders(
     limit: Optional[int] = Query(50, ge=1, le=200, description="Max results when using search"),
     db: Session = Depends(get_db)
 ):
+    # Subqueries to avoid row-multiplication when joining expenses and commission
+    expenses_sq = (
+        db.query(Expense.trip_id.label("trip_id"), func.coalesce(func.sum(Expense.amount), 0).label("expenses_sum"))
+        .group_by(Expense.trip_id)
+        .subquery()
+    )
+    commissions_sq = (
+        db.query(Commission.trip_id.label("trip_id"), func.coalesce(func.sum(Commission.amount_paid), 0).label("commission_sum"))
+        .group_by(Commission.trip_id)
+        .subquery()
+    )
+
     query = (
         db.query(
             Order.id,
@@ -27,8 +39,8 @@ def get_admin_orders(
             User.name.label("driver_name"),
             Trip.driver_id,
             Trip.revenue.label("trip_revenue"),
-            func.coalesce(func.sum(Expense.amount), 0).label("expenses"),
-            func.coalesce(Commission.amount_paid, 0).label("commission"),
+            func.coalesce(expenses_sq.c.expenses_sum, 0).label("expenses"),
+            func.coalesce(commissions_sq.c.commission_sum, 0).label("commission"),
             Trip.id.label("trip_id"),
             Trip.vehicle_id,
             Vehicle.plate_number.label("truck_plate"),
@@ -36,8 +48,8 @@ def get_admin_orders(
         )
         .outerjoin(Trip, Trip.order_id == Order.id)
         .outerjoin(User, User.id == Trip.driver_id)
-        .outerjoin(Expense, Expense.trip_id == Trip.id)
-        .outerjoin(Commission, Commission.trip_id == Trip.id)
+        .outerjoin(expenses_sq, expenses_sq.c.trip_id == Trip.id)
+        .outerjoin(commissions_sq, commissions_sq.c.trip_id == Trip.id)
         .outerjoin(Vehicle, Vehicle.id == Trip.vehicle_id)
     )
 
@@ -62,11 +74,12 @@ def get_admin_orders(
         Trip.revenue,
         User.name,
         Trip.driver_id,
-        Commission.amount_paid,
         Trip.id,
         Trip.vehicle_id,
         Vehicle.plate_number,
         Vehicle.owner_id,
+        expenses_sq.c.expenses_sum,
+        commissions_sq.c.commission_sum,
     )
 
     if search:
