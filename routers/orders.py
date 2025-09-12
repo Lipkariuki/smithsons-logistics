@@ -27,7 +27,9 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         return value if value else None
 
     # Create order
-    calculated_total = (order.cases or 0) * (order.price_per_case or 0.0)
+    # Treat `cases` as Offloading Charges (KES) and `price_per_case` as Mileage Charge (KES)
+    # These amounts should NOT affect any calculations. Keep total at 0 for new orders.
+    calculated_total = 0.0
     db_order = Order(
         order_number=order.order_number,
         invoice_number=none_if_blank(order.invoice_number),
@@ -76,11 +78,20 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         owner = db.query(User).filter(User.id == vehicle.owner_id).first()
         driver = db.query(User).filter(User.id == db_trip.driver_id).first() if db_trip.driver_id else None
 
-        message = (
-            f"🚛 New Trip Assigned\n"
-            f"Order #{order.order_number} to {order.destination}\n"
-            f"Truck: {vehicle.plate_number}"
-        )
+        # Build SMS including offloading & mileage charges if provided
+        offloading = order.cases or 0
+        mileage = order.price_per_case or 0.0
+        message_lines = [
+            "🚛 New Trip Assigned",
+            f"Order #{order.order_number} to {order.destination}",
+            f"Truck: {vehicle.plate_number}",
+        ]
+        if offloading:
+            message_lines.append(f"Offloading: {int(offloading):,} KES")
+        if mileage:
+            # format mileage with up to 2 decimals
+            message_lines.append(f"Mileage: {mileage:,.2f} KES")
+        message = "\n".join(message_lines)
 
         recipients = []
         if owner and owner.phone:
