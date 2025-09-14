@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Dict, Tuple
 
 import pandas as pd
 
@@ -143,12 +143,14 @@ def build_rate_card(
     # Do NOT include plain 'truck' (it's often the plate number)
     size_cols = ["size", "truck size", "truck_size", "tonnage", "capacity"]
     lane_cols = ["lane description", "route description", "lane", "route"]
+    cost_cols = ["cost"]
     amt_cols = ["amount", "paid", "payment", "rate", "price", "charge"]
 
     for df in dataframes:
         dcol = _find_col(df, dest_cols)
         scol = _find_col(df, size_cols)
         lcol = _find_col(df, lane_cols)
+        ccol = _find_col(df, cost_cols)
         acol = _find_col(df, amt_cols)
         if not acol:
             print(f"[WARN] Skipping a sheet missing amount column: amount={acol}")
@@ -177,6 +179,16 @@ def build_rate_card(
                             dest = normalize_destination(parts[2])
                         if not size and parts:
                             size = normalize_size(parts[-1])
+            # Filter: include only DIST rows, exclude OFFL / Offloading
+            lane_text = str(r.get(lcol) or "") if lcol else ""
+            lane_low = lane_text.lower()
+            cost_text = str(r.get(ccol) or "") if ccol else ""
+            cost_low = cost_text.lower()
+            is_offload = ("offl" in lane_low) or ("offload" in lane_low) or ("offl" in cost_low) or ("offload" in cost_low)
+            is_dist = ("dist" in lane_low) or ("dist" in cost_low)
+            if is_offload or not is_dist:
+                continue
+
             amt = to_number(r.get(acol))
             if dest and size and amt is not None and amt > 0:
                 rows.append({"DESTINATION": dest, "TRUCK SIZE": size, "AMOUNT": amt})
@@ -208,10 +220,54 @@ def build_rate_card(
     return out
 
 
+def canonicalize_rate_card(df: pd.DataFrame) -> pd.DataFrame:
+    expected = [
+        "LANE DESCRIPTION", "SOURCE", "REGION", "DESTINATION", "TRUCK SIZE", "UNUSED", "RATE (KES)"
+    ]
+    # fit to 7 columns
+    if len(df.columns) >= 7:
+        df = df.iloc[:, :7].copy()
+        df.columns = expected
+    else:
+        # pad columns
+        new_df = df.copy()
+        while len(new_df.columns) < 7:
+            new_df[f"UNUSED_{len(new_df.columns)}"] = ""
+        new_df = new_df.iloc[:, :7]
+        new_df.columns = expected
+        df = new_df
+
+    df["DESTINATION"] = df["DESTINATION"].astype(str).str.strip().str.upper()
+    df["TRUCK SIZE"] = df["TRUCK SIZE"].astype(str).str.strip().str.upper()
+    df["RATE (KES)"] = (
+        df["RATE (KES)"].astype(str).str.replace(",", "", regex=False).str.strip().replace("", "0").astype(float)
+    )
+    return df
+
+
+def merge_with_baseline(baseline_csv: Path, updates_df: pd.DataFrame) -> pd.DataFrame:
+    base_raw = pd.read_csv(baseline_csv)
+    base = canonicalize_rate_card(base_raw)
+    updates = canonicalize_rate_card(updates_df.copy())
+
+    upd_map: Dict[Tuple[str, str], float] = {}
+    for _, r in updates.iterrows():
+        k = (str(r["DESTINATION"]).upper(), str(r["TRUCK SIZE"]).upper())
+        upd_map[k] = float(r["RATE (KES)"])
+
+    new_rates: List[float] = []
+    for _, r in base.iterrows():
+        k = (r["DESTINATION"], r["TRUCK SIZE"])
+        new_rates.append(upd_map.get(k, r["RATE (KES)"]))
+    base["RATE (KES)"] = pd.Series(new_rates).round(2)
+    return base
+
+
 def main(argv: List[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Derive rate card CSV from payment spreadsheets")
     p.add_argument("--inputs", nargs="+", required=True, help="Files or directories of XLS/XLSX/CSV")
     p.add_argument("--output", required=True, help="Output CSV path")
+    p.add_argument("--merge-with", default=None, help="Baseline CSV to merge against (retain rows not present in inputs)")
     p.add_argument("--agg", default="median", choices=["median", "mean", "latest"], help="Aggregation method")
     p.add_argument("--source", default="NBO", help="Default SOURCE column value")
     p.add_argument("--region", default="", help="Default REGION column value")
@@ -230,6 +286,8 @@ def main(argv: List[str] | None = None) -> int:
             print(e)
 
     out_df = build_rate_card(dfs, default_source=args.source, default_region=args.region, agg=args.agg)
+    if args.merge_with:
+        out_df = merge_with_baseline(Path(args.merge_with), out_df)
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_csv(out_path, index=False)
