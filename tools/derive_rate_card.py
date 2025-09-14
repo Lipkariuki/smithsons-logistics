@@ -162,7 +162,8 @@ def build_rate_card(
             size = normalize_size(r.get(scol)) if scol else ""
             # Fallback: parse from lane/route description like
             #   "F24 -NBO - NANYUKI - Beer - 14T DIST" or
-            #   "F24 -NBO - UMOJA EB - Keg - 14T Offloading"
+            #   "F24 -NBO - UMOJA EB - Keg - 14T Offloading" or
+            #   "KBL NBO F20 - NAROK 7.5T BEER"
             if (not dest or not size) and lcol:
                 lane = str(r.get(lcol) or "").strip()
                 if lane:
@@ -174,11 +175,18 @@ def build_rate_card(
                         if not size:
                             size = normalize_size(parts[4])
                     else:
-                        # Try last token as size and third token as destination where possible
-                        if not dest and len(parts) >= 3:
-                            dest = normalize_destination(parts[2])
-                        if not size and parts:
-                            size = normalize_size(parts[-1])
+                        # Regex fallback: find size token and take preceding text as destination
+                        import re
+                        size_match = re.search(r"(\d+(?:\.\d+)?T|P/?\s?UP|PICKUP|VAN)", lane, flags=re.IGNORECASE)
+                        if size_match:
+                            if not size:
+                                size = normalize_size(size_match.group(1))
+                            if not dest:
+                                before = lane[:size_match.start()].strip()
+                                # If there's a '-', take text after the last '-'
+                                if '-' in before:
+                                    before = before.split('-')[-1].strip()
+                                dest = normalize_destination(before)
             # Filter: include only DIST rows, exclude OFFL / Offloading
             lane_text = str(r.get(lcol) or "") if lcol else ""
             lane_low = lane_text.lower()
@@ -268,6 +276,7 @@ def main(argv: List[str] | None = None) -> int:
     p.add_argument("--inputs", nargs="+", required=True, help="Files or directories of XLS/XLSX/CSV")
     p.add_argument("--output", required=True, help="Output CSV path")
     p.add_argument("--merge-with", default=None, help="Baseline CSV to merge against (retain rows not present in inputs)")
+    p.add_argument("--extend-baseline", action="store_true", help="When merging, also add missing destination/size pairs from inputs to the output (keeps 7-column format)")
     p.add_argument("--agg", default="median", choices=["median", "mean", "latest"], help="Aggregation method")
     p.add_argument("--source", default="NBO", help="Default SOURCE column value")
     p.add_argument("--region", default="", help="Default REGION column value")
@@ -287,7 +296,30 @@ def main(argv: List[str] | None = None) -> int:
 
     out_df = build_rate_card(dfs, default_source=args.source, default_region=args.region, agg=args.agg)
     if args.merge_with:
-        out_df = merge_with_baseline(Path(args.merge_with), out_df)
+        merged = merge_with_baseline(Path(args.merge_with), out_df)
+        if args.extend_baseline:
+            # Add rows present in out_df but missing in merged
+            base_pairs = set(zip(merged["DESTINATION"], merged["TRUCK SIZE"]))
+            upd_norm = canonicalize_rate_card(out_df)
+            add_rows = []
+            for _, r in upd_norm.iterrows():
+                key = (r["DESTINATION"], r["TRUCK SIZE"])
+                if key not in base_pairs:
+                    add_rows.append({
+                        "LANE DESCRIPTION": f"AUTO - {r['DESTINATION']} - {r['TRUCK SIZE']}",
+                        "SOURCE": args.source,
+                        "REGION": args.region,
+                        "DESTINATION": r["DESTINATION"],
+                        "TRUCK SIZE": r["TRUCK SIZE"],
+                        "UNUSED": "",
+                        "RATE (KES)": float(r["RATE (KES)"]),
+                    })
+            if add_rows:
+                import pandas as pd
+                merged = pd.concat([merged, pd.DataFrame(add_rows)], ignore_index=True)
+            out_df = merged
+        else:
+            out_df = merged
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_csv(out_path, index=False)
