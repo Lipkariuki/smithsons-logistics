@@ -22,21 +22,34 @@ from routers import (
 )
 from dotenv import load_dotenv
 import os
+import re
 
 # ✅ Load environment variables
 load_dotenv()
 
 app = FastAPI()
 
-# ✅ CORS setup — allow local + deployed frontend
-origins = [
+# ✅ CORS setup — configurable via env, with safe defaults
+# - CORS_ORIGINS: comma-separated list (exact origins)
+# - CORS_ORIGIN_REGEX: optional regex to allow a domain family (e.g., subdomains)
+default_origins = [
     "http://localhost:5173",
     "https://smithsons-logistics-frontend.onrender.com",
+    "https://www.smithsons.co.ke",
+    "https://smithsons.co.ke",
 ]
+env_origins = os.getenv("CORS_ORIGINS", "").strip()
+allow_origins = [o.strip() for o in env_origins.split(",") if o.strip()] or default_origins
+
+allow_origin_regex = os.getenv(
+    "CORS_ORIGIN_REGEX",
+    r"^https?:\/\/([a-z0-9-]+\.)*smithsons\.co\.ke$",
+).strip()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=allow_origins,
+    allow_origin_regex=allow_origin_regex if allow_origin_regex else None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
