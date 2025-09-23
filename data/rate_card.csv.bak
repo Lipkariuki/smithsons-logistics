@@ -1,4 +1,4 @@
-LANE DESCRIPTION,SOURCE,REGION,DESTINATION,Truck,,"FINAL RATE CARD
+LANE DESCRIPTION,SOURCE,REGION,DESTINATION,"Truck",,"FINAL RATE CARD
 Exclusive of other charges (Offloading, county fees, parking
 fees and any other)"
 F24 - BDC - BOMET - Spirits - 14T,NBO,Rift,BOMET,14T,,"51,352.39"
@@ -39,7 +39,7 @@ F24 - BDC - NAROK EB - Spirits - 7.5T,NBO,Rift,NAROK,7.5T,,"28,001.70"
 F24 - BDC - NAROK EB - Spirits - P/Up,NBO,Rift,NAROK,P/up,,"26,349.55"
 F24 - BDC - NJORO EB - Spirits - 14T,NBO,Rift,NJORO,14T,,"42,898.22"
 F24 - BDC - NJORO EB - Spirits - 30T,NBO,Rift,NJORO,30T,,"66,967.33"
-F24 - BDC - NJORO EB - Spirits - 7.5T,NBO,Rift,NJORO,7.5T,,"39,561.01"
+F24 - BDC - NJORO EB - Spirits - 7.5T,NBO,Rift,NJORO,7.5T,,"33,528.30"
 F24 - BDC - NJORO EB - Spirits - P/Up,NBO,Rift,NJORO,P/up,,"33,612.86"
 F24 - BDC - NYAHURURU - Spirits - 14T,NBO,Rift,NYAHURURU,14T,,"43,835.51"
 F24 - BDC - NYAHURURU - Spirits - 30T,NBO,Rift,NYAHURURU,30T,,"68,478.78"
