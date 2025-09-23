@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.orm import Session, joinedload
 from database import get_db
-from models import Trip, Vehicle, Order, User
+from models import Trip, Vehicle, Order, User, Expense
 from schemas import TripCreate, TripOut, TripWithExpensesOut
 from typing import List
 from utils.rate_lookup import get_rate
@@ -96,6 +96,20 @@ def get_trip_with_expenses(trip_id: int, db: Session = Depends(get_db)):
         "expenses": expenses,
         "total_expenses": total_expense
     }
+
+
+@router.get("/expenses-summary")
+def get_expenses_summary(db: Session = Depends(get_db)):
+    """
+    Return a lightweight mapping of trip_id -> total_expenses for all trips,
+    computed with a single grouped query. This avoids N per-trip requests.
+    """
+    rows = (
+        db.query(Expense.trip_id, func.coalesce(func.sum(Expense.amount), 0))
+        .group_by(Expense.trip_id)
+        .all()
+    )
+    return {int(trip_id): float(total or 0) for trip_id, total in rows}
 
 @router.get("/{trip_id}/profit")
 def get_trip_profit(trip_id: int, db: Session = Depends(get_db)):
