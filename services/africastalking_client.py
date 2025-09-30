@@ -1,9 +1,14 @@
 # services/africastalking_client.py
+import os
+
 import africastalking
 
-# Replace with your actual credentials
-username = "smithsons"  # Or your production username
-api_key = "atsk_92c7c96a36c04e463b526d91ee01fa9dae35bd45280e560e66b500054062c467d768579a"
+# Allow overriding credentials via environment variables, fallback to prod defaults
+USERNAME = os.getenv("AFRICASTALKING_USERNAME", "smithsons")
+API_KEY = os.getenv(
+    "AFRICASTALKING_API_KEY",
+    "atsk_e65e0f0b53256f66d10b4d39b0a65ce80b528f3e66d06b3c3bf9e7511ea5d346c0a53872",
+)
 
-africastalking.initialize(username, api_key)
+africastalking.initialize(USERNAME, API_KEY)
 sms = africastalking.SMS

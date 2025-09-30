@@ -45,6 +45,15 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         total_amount=calculated_total,
         dispatch_note=none_if_blank(order.dispatch_note_number)
     )
+
+    if db_order.invoice_number:
+        existing_invoice = db.query(Order).filter(Order.invoice_number == db_order.invoice_number).first()
+        if existing_invoice:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Invoice number '{db_order.invoice_number}' already exists. Use a unique invoice number.",
+            )
+
     db.add(db_order)
     db.commit()
     db.refresh(db_order)
@@ -79,19 +88,24 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         driver = db.query(User).filter(User.id == db_trip.driver_id).first() if db_trip.driver_id else None
 
         # Build SMS including offloading & mileage charges if provided
-        offloading = order.cases or 0
-        mileage = order.price_per_case or 0.0
-        message_lines = [
-            "🚛 New Trip Assigned",
-            f"Order #{order.order_number} to {order.destination}",
-            f"Truck: {vehicle.plate_number}",
+        offloading = float(order.cases or 0)
+        mileage = float(order.price_per_case or 0.0)
+
+        owner_name = (owner.name or "Partner") if owner else "Partner"
+        owner_name = owner_name.strip() or "Partner"
+        first_name = owner_name.split()[0]
+
+        destination = order.destination or "the destination"
+        message_parts = [
+            f"Dear {first_name}, Truck Regd. {vehicle.plate_number} has been assigned a trip to {destination}.",
         ]
+
         if offloading:
-            message_lines.append(f"Offloading: {int(offloading):,} KES")
+            message_parts.append(f"An offloading charge of Ksh {offloading:,.0f} will apply.")
         if mileage:
-            # format mileage with up to 2 decimals
-            message_lines.append(f"Mileage: {mileage:,.2f} KES")
-        message = "\n".join(message_lines)
+            message_parts.append(f"Mileage allowance: Ksh {mileage:,.2f}.")
+
+        message = " ".join(message_parts)
 
         recipients = []
         if owner and owner.phone:
