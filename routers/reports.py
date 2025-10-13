@@ -228,6 +228,14 @@ def _format_currency(value: float) -> str:
     return f"Ksh {value:,.2f}"
 
 
+def _latin1(text: Optional[str]) -> str:
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
 def _generate_pdf(report: VehicleReportOut, start: date, end: date) -> bytes:
     period_label = start.strftime("%Y-%m")
     generated_on = datetime.utcnow().strftime("%Y-%m-%d")
@@ -250,12 +258,12 @@ def _generate_pdf(report: VehicleReportOut, start: date, end: date) -> bytes:
     pdf.ln(10)
 
     pdf.set_font("Helvetica", "", 12)
-    owner_line = f"Car Owner: {report.owner_name or '—'}"
+    owner_line = f"Car Owner: {report.owner_name or 'N/A'}"
     car_line = f"Car Registration: {report.plate_number}"
-    pdf.cell(0, 8, owner_line, ln=True)
-    pdf.cell(0, 8, car_line, ln=True)
-    pdf.cell(0, 8, f"Number of Trips: {report.trip_count}", ln=True)
-    pdf.cell(0, 8, f"Period: {period_label}", ln=True)
+    pdf.cell(0, 8, _latin1(owner_line), ln=True)
+    pdf.cell(0, 8, _latin1(car_line), ln=True)
+    pdf.cell(0, 8, _latin1(f"Number of Trips: {report.trip_count}"), ln=True)
+    pdf.cell(0, 8, _latin1(f"Period: {period_label}"), ln=True)
 
     pdf.ln(6)
 
@@ -273,14 +281,14 @@ def _generate_pdf(report: VehicleReportOut, start: date, end: date) -> bytes:
             rows.append(("Balance (Actual - Net)", _format_currency(report.variance)))
 
     for label, value in rows:
-        pdf.cell(0, 8, f"{label}: {value}", ln=True)
+        pdf.cell(0, 8, _latin1(f"{label}: {value}"), ln=True)
 
     pdf.ln(10)
     pdf.set_font("Helvetica", "I", 11)
     pdf.multi_cell(
         0,
         6,
-        (
+        _latin1(
             "Note: This payslip summarizes earnings and deductions for the selected period. "
             "For detailed trip-level records, refer to the Trips or Reports section."
         ),
@@ -289,7 +297,7 @@ def _generate_pdf(report: VehicleReportOut, start: date, end: date) -> bytes:
     if report.notes:
         pdf.ln(6)
         pdf.set_font("Helvetica", "", 11)
-        pdf.multi_cell(0, 6, f"Reconciliation Notes: {report.notes}")
+        pdf.multi_cell(0, 6, _latin1(f"Reconciliation Notes: {report.notes}"))
 
     output = pdf.output(dest="S")
     if isinstance(output, str):
