@@ -97,6 +97,14 @@ def startup():
                 SET order_number = 'ORD-' || id
                 WHERE TRIM(order_number) = ''
             """))
+            conn.execute(text("""
+                ALTER TABLE orders
+                ADD COLUMN IF NOT EXISTS fuel_litres DOUBLE PRECISION
+            """))
+            conn.execute(text("""
+                ALTER TABLE orders
+                ADD COLUMN IF NOT EXISTS driver_details VARCHAR(255)
+            """))
     except Exception:
         # Avoid blocking app startup if cleanup fails; logs are visible in platform
         pass
