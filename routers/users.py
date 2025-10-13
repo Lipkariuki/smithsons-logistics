@@ -22,7 +22,12 @@ def get_my_user(current_user: User = Depends(get_current_user)):
 def list_users(role: str = None, db: Session = Depends(get_db)):
     query = db.query(User)
     if role:
-        query = query.filter(User.role == role)
+        roles = [r.strip() for r in role.split(",") if r.strip()]
+        if roles:
+            if len(roles) == 1:
+                query = query.filter(User.role == roles[0])
+            else:
+                query = query.filter(User.role.in_(roles))
     return query.all()
 
 @router.post("/", response_model=UserOut)
