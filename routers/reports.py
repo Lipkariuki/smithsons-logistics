@@ -368,7 +368,7 @@ def download_vehicle_report_pdf(
         raise HTTPException(status_code=404, detail="No report data for the selected vehicle and period")
 
     report = reports[0]
-    pdf_bytes = _generate_pdf(report, start, end)
+    pdf_bytes = bytes(_generate_pdf(report, start, end))
     filename = f"{report.plate_number}_payslip_{start.strftime('%Y%m')}.pdf"
 
     return Response(
