@@ -52,6 +52,8 @@ class Order(Base):
     cases = Column(Integer)
     price_per_case = Column(Float)
     total_amount = Column(Float)
+    fuel_litres = Column(Float, nullable=True)
+    driver_details = Column(String, nullable=True)
     dispatch_note = Column(Text, nullable=True)
 
     trip = relationship("Trip", back_populates="order", uselist=False)

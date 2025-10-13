@@ -42,6 +42,8 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         destination=order.destination,
         cases=order.cases,
         price_per_case=order.price_per_case,
+        fuel_litres=order.fuel_litres,
+        driver_details=none_if_blank(order.driver_details),
         total_amount=calculated_total,
         dispatch_note=none_if_blank(order.dispatch_note_number)
     )
@@ -104,6 +106,14 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
             message_parts.append(f"An offloading charge of Ksh {offloading:,.0f} will apply.")
         if mileage:
             message_parts.append(f"Mileage allowance: Ksh {mileage:,.2f}.")
+        if order.fuel_litres:
+            litres = float(order.fuel_litres)
+            litres_str = f"{int(litres)}" if litres.is_integer() else f"{litres:.2f}".rstrip("0").rstrip(".")
+            message_parts.append(f"Fuel allocation: {litres_str} litres.")
+
+        driver_details = none_if_blank(order.driver_details)
+        if driver_details:
+            message_parts.append(f"Driver: {driver_details}.")
 
         message = " ".join(message_parts)
 
@@ -201,6 +211,8 @@ def get_orders(month: int = Query(None, ge=1, le=12), db: Session = Depends(get_
             cases=order.cases,
             price_per_case=order.price_per_case,
             total_amount=order.total_amount,
+            fuel_litres=order.fuel_litres,
+            driver_details=order.driver_details,
             dispatch_note=order.dispatch_note,
             trip=enriched_trip,
             expenses=expenses_total,

@@ -36,6 +36,8 @@ def get_admin_orders(
             Order.date,
             Order.product_description,
             Order.destination,
+            Order.fuel_litres,
+            Order.driver_details,
             User.name.label("driver_name"),
             Trip.driver_id,
             Trip.revenue.label("trip_revenue"),
@@ -71,6 +73,8 @@ def get_admin_orders(
         Order.date,
         Order.product_description,
         Order.destination,
+        Order.fuel_litres,
+        Order.driver_details,
         Trip.revenue,
         User.name,
         Trip.driver_id,
@@ -106,6 +110,8 @@ def get_admin_orders(
             revenue=revenue,
             trip_id=row.trip_id,
             truck_plate=row.truck_plate,
+            fuel_litres=row.fuel_litres,
+            driver_details=row.driver_details,
         ))
 
     return admin_orders

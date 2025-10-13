@@ -57,6 +57,8 @@ class OrderCreate(BaseModel):
     destination: Optional[str] = None
     cases: Optional[int] = 0
     price_per_case: Optional[float] = 0
+    fuel_litres: Optional[float] = None
+    driver_details: Optional[str] = None
     #total_amount: Optional[float] = 0
 
 class OrderOut(BaseModel):
@@ -73,6 +75,8 @@ class OrderOut(BaseModel):
     cases: Optional[int] = 0
     price_per_case: Optional[float] = 0.0
     total_amount: Optional[float] = 0.0
+    fuel_litres: Optional[float] = None
+    driver_details: Optional[str] = None
     dispatch_note: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
@@ -94,6 +98,8 @@ class AdminOrderOut(BaseModel):
     revenue: float
     trip_id: Optional[int] = None
     truck_plate: Optional[str] = None
+    fuel_litres: Optional[float] = None
+    driver_details: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 # =========================
@@ -154,6 +160,8 @@ class OrderWithTripAndDriverOut(BaseModel):
     cases: int
     price_per_case: float
     total_amount: float
+    fuel_litres: Optional[float] = None
+    driver_details: Optional[str] = None
     dispatch_note: Optional[str] = None
     trip: Optional[TripWithDriverVehicleOut]
     expenses: float = 0
