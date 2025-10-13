@@ -238,3 +238,50 @@ class TripWithOrderOut(BaseModel):
     total_amount: Optional[float] = None
     vehicle_plate: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
+
+# =========================
+# OWNER RECONCILIATION & REPORTS
+# =========================
+
+
+class OwnerReconciliationCreate(BaseModel):
+    vehicle_plate: str
+    period_start: date
+    period_end: date
+    fuel_cost: float | None = 0.0
+    extra_expenses: float | None = 0.0
+    commission_adjustment: float | None = 0.0
+    actual_payment: float | None = None
+    notes: Optional[str] = None
+
+
+class OwnerReconciliationOut(BaseModel):
+    id: int
+    vehicle_id: int
+    vehicle_plate: str
+    period_start: date
+    period_end: date
+    fuel_cost: float
+    extra_expenses: float
+    commission_adjustment: float
+    actual_payment: Optional[float]
+    notes: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VehicleReportOut(BaseModel):
+    vehicle_id: int
+    plate_number: str
+    owner_id: Optional[int] = None
+    owner_name: str
+    owner_phone: Optional[str]
+    trip_count: int
+    gross_revenue: float
+    fuel_cost: float
+    other_expenses: float
+    extra_expenses: float
+    commission: float
+    net_profit: float
+    actual_payment: Optional[float] = None
+    variance: Optional[float] = None
+    notes: Optional[str] = None

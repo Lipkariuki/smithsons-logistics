@@ -18,7 +18,8 @@ from routers import (
     partner_orders,
     driver_expense,
     rates,
-    metadata
+    metadata,
+    reports
 )
 from dotenv import load_dotenv
 import os
@@ -70,6 +71,7 @@ app.include_router(driver_trips.router)
 app.include_router(rates.router, tags=["Rates"])
 app.include_router(driver_expense.router)
 app.include_router(metadata.router)
+app.include_router(reports.router)
 
 @app.on_event("startup")
 def startup():

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum, Text
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum, Text, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -108,3 +108,23 @@ class Commission(Base):
     status = Column(Enum("pending", "paid", name="commission_status"), default="pending")
 
     trip = relationship("Trip", back_populates="commission")
+
+
+class OwnerReconciliation(Base):
+    __tablename__ = "owner_reconciliations"
+    __table_args__ = (
+        UniqueConstraint("vehicle_id", "period_start", "period_end", name="uq_vehicle_period"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    fuel_cost = Column(Float, default=0.0)
+    extra_expenses = Column(Float, default=0.0)
+    commission_adjustment = Column(Float, default=0.0)
+    actual_payment = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    vehicle = relationship("Vehicle")
