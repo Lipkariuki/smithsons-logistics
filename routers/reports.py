@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from database import get_db
 from models import OwnerReconciliation, Trip, User, Vehicle
-from schemas import OwnerReconciliationOut, VehicleReportOut
+from schemas import VehicleReportOut
 from utils.sms import send_sms
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
