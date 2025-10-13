@@ -54,14 +54,38 @@ def _parse_float(value: Optional[str]) -> float:
         raise HTTPException(status_code=400, detail=f"Invalid numeric value: '{value}'") from exc
 
 
+def _resolve_vehicle_ids(
+    db: Session,
+    vehicle_id: Optional[int],
+    vehicle_plate: Optional[str],
+) -> set[int]:
+    ids: set[int] = set()
+    if vehicle_id:
+        ids.add(vehicle_id)
+    if vehicle_plate:
+        norm_plate = _normalize_plate(vehicle_plate)
+        matches = (
+            db.query(Vehicle.id)
+            .filter(Vehicle.plate_number.in_({vehicle_plate.strip().upper(), norm_plate}))
+            .all()
+        )
+        ids.update(row[0] for row in matches)
+    return ids
+
+
 def _build_vehicle_reports(
     db: Session,
     owner_id: Optional[int],
     vehicle_id: Optional[int],
+    vehicle_plate: Optional[str],
     start_date: date,
     end_date: date,
 ) -> list[VehicleReportOut]:
     start_dt, end_dt = _date_bounds(start_date, end_date)
+
+    vehicle_ids = _resolve_vehicle_ids(db, vehicle_id, vehicle_plate)
+    if vehicle_plate and not vehicle_ids:
+        return []
 
     trip_query = (
         db.query(Trip)
@@ -74,8 +98,8 @@ def _build_vehicle_reports(
     )
     if owner_id:
         trip_query = trip_query.join(Vehicle).filter(Vehicle.owner_id == owner_id)
-    if vehicle_id:
-        trip_query = trip_query.filter(Trip.vehicle_id == vehicle_id)
+    if vehicle_ids:
+        trip_query = trip_query.filter(Trip.vehicle_id.in_(vehicle_ids))
 
     trips = trip_query.all()
 
@@ -110,8 +134,8 @@ def _build_vehicle_reports(
     vehicle_query = db.query(Vehicle).options(joinedload(Vehicle.owner))
     if owner_id:
         vehicle_query = vehicle_query.filter(Vehicle.owner_id == owner_id)
-    if vehicle_id:
-        vehicle_query = vehicle_query.filter(Vehicle.id == vehicle_id)
+    if vehicle_ids:
+        vehicle_query = vehicle_query.filter(Vehicle.id.in_(vehicle_ids))
 
     vehicles = vehicle_query.all()
 
@@ -277,12 +301,13 @@ def _generate_pdf(report: VehicleReportOut, start: date, end: date) -> bytes:
 def get_reports_summary(
     owner_id: Optional[int] = Query(None),
     vehicle_id: Optional[int] = Query(None),
+    vehicle_plate: Optional[str] = Query(None),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
 ):
     start, end = _default_dates(start_date, end_date)
-    return _build_vehicle_reports(db, owner_id, vehicle_id, start, end)
+    return _build_vehicle_reports(db, owner_id, vehicle_id, vehicle_plate, start, end)
 
 
 class SendReportPayload(BaseModel):
@@ -294,7 +319,7 @@ class SendReportPayload(BaseModel):
 @router.post("/send")
 def send_vehicle_report(payload: SendReportPayload, db: Session = Depends(get_db)):
     start, end = _default_dates(payload.start_date, payload.end_date)
-    reports = _build_vehicle_reports(db, None, payload.vehicle_id, start, end)
+    reports = _build_vehicle_reports(db, None, payload.vehicle_id, None, start, end)
     if not reports:
         raise HTTPException(status_code=404, detail="No report data for the selected vehicle and period")
 
@@ -330,7 +355,7 @@ def download_vehicle_report_pdf(
     db: Session = Depends(get_db),
 ):
     start, end = _default_dates(start_date, end_date)
-    reports = _build_vehicle_reports(db, None, vehicle_id, start, end)
+    reports = _build_vehicle_reports(db, None, vehicle_id, None, start, end)
     if not reports:
         raise HTTPException(status_code=404, detail="No report data for the selected vehicle and period")
 
