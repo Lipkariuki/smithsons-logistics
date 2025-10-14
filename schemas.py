@@ -41,6 +41,12 @@ class VehicleOut(VehicleCreate):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
+
+class VehicleUpdate(BaseModel):
+    plate_number: Optional[str] = None
+    owner_id: Optional[int] = None
+    size: Optional[str] = None
+
 # =========================
 # ORDER
 # =========================
@@ -185,6 +191,26 @@ class ExpenseOut(BaseModel):
     timestamp: datetime
     trip_id: int
     model_config = ConfigDict(from_attributes=True)
+
+
+class ExpenseListItem(BaseModel):
+    id: int
+    trip_id: Optional[int] = None
+    order_number: Optional[str] = None
+    vehicle_plate: Optional[str] = None
+    destination: Optional[str] = None
+    amount: float
+    description: Optional[str] = None
+    timestamp: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExpenseListResponse(BaseModel):
+    items: list[ExpenseListItem]
+    total: int
+    page: int
+    per_page: int
+    total_amount: float
 
 class SimpleExpenseOut(BaseModel):
     id: int

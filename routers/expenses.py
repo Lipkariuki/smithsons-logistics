@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List
 from database import get_db
-from models import Expense, Trip, Order
-from schemas import ExpenseCreate, ExpenseOut
+from models import Expense, Trip, Order, Vehicle
+from schemas import ExpenseCreate, ExpenseOut, ExpenseListResponse, ExpenseListItem
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
 
@@ -58,30 +59,79 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "deleted"}
 
-@router.get("/")
-def get_expenses(db: Session = Depends(get_db)):
-    expenses = db.query(Expense).all()
-    results = []
+@router.get("/", response_model=ExpenseListResponse)
+def get_expenses(
+    page: int = 1,
+    per_page: int = 25,
+    db: Session = Depends(get_db),
+):
+    if page < 1:
+        page = 1
+    per_page = max(1, min(per_page, 100))
+    offset = (page - 1) * per_page
 
-    for exp in expenses:
-        trip = exp.trip
-        vehicle_plate = trip.vehicle.plate_number if trip and trip.vehicle else None
-        destination = trip.order.destination if trip and trip.order else None
-        if trip and trip.order:
-            # Prefer explicit order_number; fall back to invoice or ORD-{id}
-            order_number = trip.order.order_number or trip.order.invoice_number or f"ORD-{trip.order.id}"
+    total = db.query(func.count(Expense.id)).scalar() or 0
+    if total == 0:
+        return ExpenseListResponse(
+            items=[],
+            total=0,
+            page=page,
+            per_page=per_page,
+            total_amount=0.0,
+        )
+
+    sum_amount = db.query(func.coalesce(func.sum(Expense.amount), 0)).scalar() or 0.0
+
+    query = (
+        db.query(
+            Expense.id,
+            Expense.trip_id,
+            Expense.amount,
+            Expense.description,
+            Expense.timestamp,
+            Trip.order_id,
+            Vehicle.plate_number.label("vehicle_plate"),
+            Order.order_number,
+            Order.invoice_number,
+            Order.destination,
+        )
+        .outerjoin(Trip, Expense.trip_id == Trip.id)
+        .outerjoin(Vehicle, Trip.vehicle_id == Vehicle.id)
+        .outerjoin(Order, Trip.order_id == Order.id)
+        .order_by(Expense.timestamp.desc(), Expense.id.desc())
+        .offset(offset)
+        .limit(per_page)
+    )
+
+    rows = query.all()
+
+    items: list[ExpenseListItem] = []
+    for row in rows:
+        if row.order_number:
+            order_number = row.order_number
+        elif row.invoice_number:
+            order_number = row.invoice_number
+        elif row.order_id:
+            order_number = f"ORD-{row.order_id}"
         else:
             order_number = None
 
-        results.append({
-            "id": exp.id,
-            "trip_id": exp.trip_id,
-            "order_number": order_number,
-            "vehicle_plate": vehicle_plate,
-            "destination": destination,
-            "amount": exp.amount,
-            "description": exp.description,
-            "timestamp": exp.timestamp.isoformat() if exp.timestamp else None,
-        })
+        item = ExpenseListItem(
+            id=row.id,
+            trip_id=row.trip_id,
+            order_number=order_number,
+            vehicle_plate=row.vehicle_plate,
+            destination=row.destination,
+            amount=row.amount,
+            description=row.description,
+            timestamp=row.timestamp,
+        )
+        items.append(item)
 
-    return results
+    return ExpenseListResponse(
+        items=items,
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_amount=float(sum_amount),
+    )
