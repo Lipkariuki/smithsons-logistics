@@ -10,10 +10,18 @@ from schemas import (
     OrderCreate,
     OrderOut,
     OrderWithTripAndDriverOut,
-    TripWithDriverVehicleOut
+    TripWithDriverVehicleOut,
+    OrderUpdate,
 )
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
+
+
+def _normalize_optional_string(value: str | None):
+    if value is None:
+        return None
+    value = value.strip()
+    return value if value else None
 
 
 @router.post("/", response_model=OrderOut)
@@ -154,6 +162,32 @@ def assign_vehicle(order_id: int, vehicle_id: int, db: Session = Depends(get_db)
     trip.vehicle_id = vehicle_id
     db.commit()
     return {"message": "Vehicle assigned successfully"}
+
+
+@router.patch("/{order_id}", response_model=OrderOut)
+def update_order(order_id: int, payload: OrderUpdate, db: Session = Depends(get_db)):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if payload.product_description is not None:
+        order.product_description = _normalize_optional_string(payload.product_description)
+
+    if payload.destination is not None:
+        order.destination = payload.destination.strip()
+
+    if payload.fuel_litres is not None:
+        try:
+            order.fuel_litres = float(payload.fuel_litres)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid fuel_litres value")
+
+    if payload.driver_details is not None:
+        order.driver_details = _normalize_optional_string(payload.driver_details)
+
+    db.commit()
+    db.refresh(order)
+    return order
 
 
 @router.get("/", response_model=list[OrderWithTripAndDriverOut])

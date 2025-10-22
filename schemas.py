@@ -86,6 +86,13 @@ class OrderOut(BaseModel):
     dispatch_note: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
+
+class OrderUpdate(BaseModel):
+    product_description: Optional[str] = None
+    destination: Optional[str] = None
+    fuel_litres: Optional[float] = None
+    driver_details: Optional[str] = None
+
 class AdminOrderOut(BaseModel):
     id: int
     order_number: Optional[str] = None
