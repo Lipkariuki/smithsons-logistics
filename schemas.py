@@ -315,6 +315,7 @@ class VehicleReportOut(BaseModel):
     extra_expenses: float
     commission: float
     net_profit: float
+    fuel_litres_total: float = 0.0
     actual_payment: Optional[float] = None
     variance: Optional[float] = None
     notes: Optional[str] = None

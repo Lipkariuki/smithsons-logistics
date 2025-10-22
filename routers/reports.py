@@ -93,6 +93,7 @@ def _build_vehicle_reports(
             joinedload(Trip.expenses),
             joinedload(Trip.commission),
             joinedload(Trip.vehicle).joinedload(Vehicle.owner),
+            joinedload(Trip.order),
         )
         .filter(Trip.created_at >= start_dt, Trip.created_at < end_dt)
     )
@@ -122,6 +123,7 @@ def _build_vehicle_reports(
                 "extra_expenses": 0.0,
                 "actual_payment": 0.0,
                 "notes": [],
+                "fuel_litres_total": 0.0,
             },
         )
         data["trip_count"] += 1
@@ -130,6 +132,8 @@ def _build_vehicle_reports(
             data["other_expenses"] += float(expense.amount or 0.0)
         if trip.commission:
             data["commission"] += float(trip.commission.amount_paid or 0.0)
+        if trip.order and trip.order.fuel_litres:
+            data["fuel_litres_total"] += float(trip.order.fuel_litres or 0.0)
 
     vehicle_query = db.query(Vehicle).options(joinedload(Vehicle.owner))
     if owner_id:
@@ -152,6 +156,7 @@ def _build_vehicle_reports(
                 "extra_expenses": 0.0,
                 "actual_payment": 0.0,
                 "notes": [],
+                "fuel_litres_total": 0.0,
             },
         )
 
@@ -214,6 +219,7 @@ def _build_vehicle_reports(
                 extra_expenses=round(extra_expenses, 2),
                 commission=round(commission_total, 2),
                 net_profit=round(net_profit, 2),
+                fuel_litres_total=round(data["fuel_litres_total"], 2),
                 actual_payment=round(actual_payment, 2) if actual_payment is not None else None,
                 variance=round(variance, 2) if variance is not None else None,
                 notes=notes,
@@ -270,7 +276,7 @@ def _generate_pdf(report: VehicleReportOut, start: date, end: date) -> bytes:
     pdf.set_font("Helvetica", "", 12)
     rows = [
         ("Gross Revenue (Trips)", _format_currency(report.gross_revenue)),
-        ("Less: Fuel", _format_currency(report.fuel_cost)),
+        ("Less: Fuel Cost", _format_currency(report.fuel_cost)),
         ("Less: Other Expenses", _format_currency(other_total)),
         ("Less: Commission", _format_currency(report.commission)),
         ("Net Profit", _format_currency(report.net_profit)),
@@ -282,6 +288,15 @@ def _generate_pdf(report: VehicleReportOut, start: date, end: date) -> bytes:
 
     for label, value in rows:
         pdf.cell(0, 8, _latin1(f"{label}: {value}"), ln=True)
+
+    pdf.cell(
+        0,
+        8,
+        _latin1(
+            f"Fuel allocation: {report.fuel_litres_total:,.2f} litres"
+        ),
+        ln=True,
+    )
 
     pdf.ln(10)
     pdf.set_font("Helvetica", "I", 11)
@@ -341,6 +356,7 @@ def send_vehicle_report(payload: SendReportPayload, db: Session = Depends(get_db
         f"Trips: {report.trip_count}",
         f"Gross: Ksh {report.gross_revenue:,.2f}",
         f"Fuel: Ksh {report.fuel_cost:,.2f}",
+        f"Fuel allocation: {report.fuel_litres_total:,.2f} litres",
         f"Other expenses: Ksh {report.other_expenses + report.extra_expenses:,.2f}",
         f"Commission: Ksh {report.commission:,.2f}",
         f"Net: Ksh {report.net_profit:,.2f}",
