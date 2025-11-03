@@ -227,6 +227,31 @@ class SimpleExpenseOut(BaseModel):
     trip_id: int
     model_config = ConfigDict(from_attributes=True)
 
+
+class FuelExpenseBase(BaseModel):
+    fuel_type: str
+    price_per_litre: float
+    amount: float
+    litres: float
+
+
+class FuelExpenseCreate(FuelExpenseBase):
+    trip_id: Optional[int] = None
+
+
+class FuelExpenseUpdate(BaseModel):
+    fuel_type: Optional[str] = None
+    price_per_litre: Optional[float] = None
+    amount: Optional[float] = None
+    litres: Optional[float] = None
+
+
+class FuelExpenseOut(FuelExpenseBase):
+    trip_id: int
+    updated_by: Optional[int]
+    updated_at: Optional[datetime]
+    model_config = ConfigDict(from_attributes=True)
+
 # =========================
 # COMMISSION
 # =========================
