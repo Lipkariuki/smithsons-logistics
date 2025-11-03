@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, select, literal, union_all, desc, String, Float
 from typing import List
 from database import get_db
-from models import Expense, Trip, Order, Vehicle
+from models import Expense, Trip, Order, Vehicle, FuelExpense
 from schemas import ExpenseCreate, ExpenseOut, ExpenseListResponse, ExpenseListItem
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
@@ -79,12 +79,56 @@ def get_expenses(
     per_page = max(1, min(per_page, 100))
     offset = (page - 1) * per_page
 
-    total = (
-        db.query(func.count(Expense.id))
-        .filter(Expense.is_deleted.is_(False))
-        .scalar()
-        or 0
+    expense_select = (
+        select(
+            Expense.id.label("id"),
+            Expense.trip_id.label("trip_id"),
+            Expense.amount.label("amount"),
+            Expense.description.label("description"),
+            Expense.timestamp.label("timestamp"),
+            Trip.order_id.label("order_id"),
+            Vehicle.plate_number.label("vehicle_plate"),
+            Order.order_number.label("order_number"),
+            Order.invoice_number.label("invoice_number"),
+            Order.destination.label("destination"),
+            literal(None, type_=Float).label("fuel_litres"),
+            literal(None, type_=Float).label("fuel_price_per_litre"),
+            literal(None, type_=String).label("fuel_type"),
+            literal("expense", type_=String).label("kind"),
+        )
+        .select_from(Expense)
+        .outerjoin(Trip, Expense.trip_id == Trip.id)
+        .outerjoin(Vehicle, Trip.vehicle_id == Vehicle.id)
+        .outerjoin(Order, Trip.order_id == Order.id)
+        .where(Expense.is_deleted.is_(False))
     )
+
+    fuel_select = (
+        select(
+            FuelExpense.id.label("id"),
+            FuelExpense.trip_id.label("trip_id"),
+            FuelExpense.amount.label("amount"),
+            literal(None, type_=String).label("description"),
+            FuelExpense.updated_at.label("timestamp"),
+            Trip.order_id.label("order_id"),
+            Vehicle.plate_number.label("vehicle_plate"),
+            Order.order_number.label("order_number"),
+            Order.invoice_number.label("invoice_number"),
+            Order.destination.label("destination"),
+            FuelExpense.litres.label("fuel_litres"),
+            FuelExpense.price_per_litre.label("fuel_price_per_litre"),
+            FuelExpense.fuel_type.label("fuel_type"),
+            literal("fuel", type_=String).label("kind"),
+        )
+        .select_from(FuelExpense)
+        .join(Trip, FuelExpense.trip_id == Trip.id)
+        .outerjoin(Vehicle, Trip.vehicle_id == Vehicle.id)
+        .outerjoin(Order, Trip.order_id == Order.id)
+    )
+
+    combined_subquery = union_all(expense_select, fuel_select).subquery()
+
+    total = db.execute(select(func.count()).select_from(combined_subquery)).scalar() or 0
     if total == 0:
         return ExpenseListResponse(
             items=[],
@@ -95,56 +139,49 @@ def get_expenses(
         )
 
     sum_amount = (
-        db.query(func.coalesce(func.sum(Expense.amount), 0))
-        .filter(Expense.is_deleted.is_(False))
-        .scalar()
-        or 0.0
+        db.execute(select(func.coalesce(func.sum(combined_subquery.c.amount), 0.0))).scalar() or 0.0
     )
 
-    query = (
-        db.query(
-            Expense.id,
-            Expense.trip_id,
-            Expense.amount,
-            Expense.description,
-            Expense.timestamp,
-            Trip.order_id,
-            Vehicle.plate_number.label("vehicle_plate"),
-            Order.order_number,
-            Order.invoice_number,
-            Order.destination,
-        )
-        .outerjoin(Trip, Expense.trip_id == Trip.id)
-        .outerjoin(Vehicle, Trip.vehicle_id == Vehicle.id)
-        .outerjoin(Order, Trip.order_id == Order.id)
-        .filter(Expense.is_deleted.is_(False))
-        .order_by(Expense.timestamp.desc(), Expense.id.desc())
-        .offset(offset)
-        .limit(per_page)
+    rows = (
+        db.execute(
+            select(combined_subquery)
+            .order_by(desc(combined_subquery.c.timestamp), desc(combined_subquery.c.id))
+            .offset(offset)
+            .limit(per_page)
+        ).mappings().all()
     )
-
-    rows = query.all()
 
     items: list[ExpenseListItem] = []
     for row in rows:
-        if row.order_number:
-            order_number = row.order_number
-        elif row.invoice_number:
-            order_number = row.invoice_number
-        elif row.order_id:
-            order_number = f"ORD-{row.order_id}"
+        if row["order_number"]:
+            order_number = row["order_number"]
+        elif row["invoice_number"]:
+            order_number = row["invoice_number"]
+        elif row["order_id"]:
+            order_number = f"ORD-{row['order_id']}"
         else:
             order_number = None
 
+        if row["kind"] == "fuel":
+            litres = row["fuel_litres"] or 0.0
+            price = row["fuel_price_per_litre"] or 0.0
+            fuel_type = (row["fuel_type"] or "").upper()
+            description = (
+                f"Fuel expense: {litres:.2f} L @ {price:.2f}/L"
+                + (f" ({fuel_type})" if fuel_type else "")
+            )
+        else:
+            description = row["description"]
+
         item = ExpenseListItem(
-            id=row.id,
-            trip_id=row.trip_id,
+            id=row["id"],
+            trip_id=row["trip_id"],
             order_number=order_number,
-            vehicle_plate=row.vehicle_plate,
-            destination=row.destination,
-            amount=row.amount,
-            description=row.description,
-            timestamp=row.timestamp,
+            vehicle_plate=row["vehicle_plate"],
+            destination=row["destination"],
+            amount=row["amount"],
+            description=description,
+            timestamp=row["timestamp"],
         )
         items.append(item)
 
