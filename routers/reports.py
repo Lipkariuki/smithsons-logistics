@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Iterable, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 from fpdf import FPDF
@@ -17,6 +17,8 @@ from schemas import VehicleReportOut
 from utils.sms import send_sms
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
+
+DEFAULT_FUEL_PRICE = 171.0
 
 
 def _normalize_plate(value: str) -> str:
@@ -73,6 +75,13 @@ def _resolve_vehicle_ids(
     return ids
 
 
+def _looks_like_fuel(description: Optional[str]) -> bool:
+    if not description:
+        return False
+    lower = description.lower()
+    return "fuel" in lower or "diesel" in lower or "petrol" in lower
+
+
 def _build_vehicle_reports(
     db: Session,
     owner_id: Optional[int],
@@ -94,6 +103,7 @@ def _build_vehicle_reports(
             joinedload(Trip.commission),
             joinedload(Trip.vehicle).joinedload(Vehicle.owner),
             joinedload(Trip.order),
+            joinedload(Trip.fuel_expense),
         )
         .filter(Trip.created_at >= start_dt, Trip.created_at < end_dt)
     )
@@ -128,12 +138,28 @@ def _build_vehicle_reports(
         )
         data["trip_count"] += 1
         data["gross_revenue"] += float(trip.revenue or 0.0)
+
         for expense in trip.expenses or []:
+            if _looks_like_fuel(expense.description):
+                continue
             data["other_expenses"] += float(expense.amount or 0.0)
+
         if trip.commission:
             data["commission"] += float(trip.commission.amount_paid or 0.0)
-        if trip.order and trip.order.fuel_litres:
-            data["fuel_litres_total"] += float(trip.order.fuel_litres or 0.0)
+
+        fuel = trip.fuel_expense
+        if fuel:
+            data["fuel_cost"] += float(fuel.amount or 0.0)
+            data["fuel_litres_total"] += float(fuel.litres or 0.0)
+        else:
+            # fall back to legacy order field if present
+            litres = None
+            if trip.order is not None:
+                litres = getattr(trip.order, "fuel_litres", None)
+            if litres:
+                litres_value = float(litres or 0.0)
+                data["fuel_litres_total"] += litres_value
+                data["fuel_cost"] += litres_value * DEFAULT_FUEL_PRICE
 
     vehicle_query = db.query(Vehicle).options(joinedload(Vehicle.owner))
     if owner_id:
@@ -505,5 +531,12 @@ async def upload_reconciliation(file: UploadFile = File(...), db: Session = Depe
 
 @router.get("/reconciliation/template")
 def download_template():
-    path = "data/templates/owner_reconciliation_template.csv"
-    return FileResponse(path, media_type="text/csv", filename="owner_reconciliation_template.csv")
+    csv_template = (
+        "vehicle_plate,period_start,period_end,fuel_cost,extra_expenses,commission_adjustment,actual_payment,notes\n"
+        'KAA123X,2025-01-01,2025-01-31,15000,2500,0,98000,"Example note about manual adjustments"\n'
+    )
+    return Response(
+        content=csv_template,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="owner_reconciliation_template.csv"'},
+    )

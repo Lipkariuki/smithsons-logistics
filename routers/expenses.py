@@ -34,7 +34,11 @@ def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db)):
 
 @router.patch("/{expense_id}", response_model=ExpenseOut)
 def update_expense(expense_id: int, payload: dict, db: Session = Depends(get_db)):
-    exp = db.query(Expense).filter(Expense.id == expense_id).first()
+    exp = (
+        db.query(Expense)
+        .filter(Expense.id == expense_id, Expense.is_deleted.is_(False))
+        .first()
+    )
     if not exp:
         raise HTTPException(status_code=404, detail="Expense not found")
     # Allowed fields: amount, description
@@ -52,12 +56,17 @@ def update_expense(expense_id: int, payload: dict, db: Session = Depends(get_db)
 
 @router.delete("/{expense_id}")
 def delete_expense(expense_id: int, db: Session = Depends(get_db)):
-    exp = db.query(Expense).filter(Expense.id == expense_id).first()
+    exp = (
+        db.query(Expense)
+        .filter(Expense.id == expense_id, Expense.is_deleted.is_(False))
+        .first()
+    )
     if not exp:
         raise HTTPException(status_code=404, detail="Expense not found")
-    db.delete(exp)
+    exp.is_deleted = True
     db.commit()
     return {"status": "deleted"}
+
 
 @router.get("/", response_model=ExpenseListResponse)
 def get_expenses(
@@ -70,7 +79,12 @@ def get_expenses(
     per_page = max(1, min(per_page, 100))
     offset = (page - 1) * per_page
 
-    total = db.query(func.count(Expense.id)).scalar() or 0
+    total = (
+        db.query(func.count(Expense.id))
+        .filter(Expense.is_deleted.is_(False))
+        .scalar()
+        or 0
+    )
     if total == 0:
         return ExpenseListResponse(
             items=[],
@@ -80,7 +94,12 @@ def get_expenses(
             total_amount=0.0,
         )
 
-    sum_amount = db.query(func.coalesce(func.sum(Expense.amount), 0)).scalar() or 0.0
+    sum_amount = (
+        db.query(func.coalesce(func.sum(Expense.amount), 0))
+        .filter(Expense.is_deleted.is_(False))
+        .scalar()
+        or 0.0
+    )
 
     query = (
         db.query(
@@ -98,6 +117,7 @@ def get_expenses(
         .outerjoin(Trip, Expense.trip_id == Trip.id)
         .outerjoin(Vehicle, Trip.vehicle_id == Vehicle.id)
         .outerjoin(Order, Trip.order_id == Order.id)
+        .filter(Expense.is_deleted.is_(False))
         .order_by(Expense.timestamp.desc(), Expense.id.desc())
         .offset(offset)
         .limit(per_page)

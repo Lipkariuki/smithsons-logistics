@@ -1,4 +1,16 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum, Text, Date, UniqueConstraint
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    ForeignKey,
+    DateTime,
+    Enum,
+    Text,
+    UniqueConstraint,
+    Date,
+    Boolean,
+)
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -81,6 +93,7 @@ class Trip(Base):
     order = relationship("Order", back_populates="trip")
     expenses = relationship("Expense", back_populates="trip")
     commission = relationship("Commission", back_populates="trip", uselist=False)
+    fuel_expense = relationship("FuelExpense", back_populates="trip", uselist=False)
 
 
 # ✅ Expense
@@ -93,6 +106,7 @@ class Expense(Base):
     description = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    is_deleted = Column(Boolean, default=False, server_default="false", nullable=False)
 
     trip = relationship("Trip", back_populates="expenses")
 
@@ -108,6 +122,22 @@ class Commission(Base):
     status = Column(Enum("pending", "paid", name="commission_status"), default="pending")
 
     trip = relationship("Trip", back_populates="commission")
+
+
+class FuelExpense(Base):
+    __tablename__ = "fuel_expenses"
+
+    id = Column(Integer, primary_key=True)
+    trip_id = Column(Integer, ForeignKey("trips.id"), unique=True, index=True)
+    fuel_type = Column(Enum("diesel", "petrol", name="fuel_type"), nullable=False, default="diesel")
+    price_per_litre = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)
+    litres = Column(Float, nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    trip = relationship("Trip", back_populates="fuel_expense")
+    updated_by_user = relationship("User")
 
 
 class OwnerReconciliation(Base):
