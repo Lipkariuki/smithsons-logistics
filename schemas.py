@@ -159,6 +159,14 @@ class TripWithDriverVehicleOut(BaseModel):
     revenue: Optional[float] = 0.0
     model_config = ConfigDict(from_attributes=True)
 
+class TripRevenueUpdate(BaseModel):
+    revenue: float
+    reason: Optional[str] = None
+
+class TripRevenueOut(BaseModel):
+    trip_id: int
+    revenue: float
+
 class OrderWithTripAndDriverOut(BaseModel):
     id: int
     order_number: Optional[str] = None

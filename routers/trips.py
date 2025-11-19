@@ -9,6 +9,8 @@ from schemas import (
     FuelExpenseCreate,
     FuelExpenseUpdate,
     FuelExpenseOut,
+    TripRevenueUpdate,
+    TripRevenueOut,
 )
 from typing import List
 from utils.rate_lookup import get_rate
@@ -81,6 +83,47 @@ def _get_trip_or_404(db: Session, trip_id: int) -> Trip:
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found.")
     return trip
+
+
+def _update_trip_revenue_value(
+    db: Session, trip_id: int, payload: TripRevenueUpdate
+) -> TripRevenueOut:
+    trip = _get_trip_or_404(db, trip_id)
+    try:
+        trip.revenue = float(payload.revenue)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid revenue value")
+    db.commit()
+    db.refresh(trip)
+    return TripRevenueOut(trip_id=trip.id, revenue=trip.revenue)
+
+
+@router.patch(
+    "/{trip_id}/revenue",
+    response_model=TripRevenueOut,
+    tags=["Trips"],
+)
+def patch_trip_revenue(
+    trip_id: int,
+    payload: TripRevenueUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    return _update_trip_revenue_value(db, trip_id, payload)
+
+
+@router.put(
+    "/{trip_id}/revenue",
+    response_model=TripRevenueOut,
+    tags=["Trips"],
+)
+def put_trip_revenue(
+    trip_id: int,
+    payload: TripRevenueUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    return _update_trip_revenue_value(db, trip_id, payload)
 
 
 @router.get(
