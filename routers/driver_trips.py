@@ -57,7 +57,7 @@ def get_driver_expenses(
             joinedload(Expense.trip).joinedload(Trip.vehicle),
             joinedload(Expense.trip).joinedload(Trip.order),
         )
-        .filter(Trip.driver_id == current_user.id)
+        .filter(Trip.driver_id == current_user.id, Expense.is_deleted.is_(False))
         .all()
     )
 

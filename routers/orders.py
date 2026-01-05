@@ -34,10 +34,26 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         value = value.strip()
         return value if value else None
 
+    # Try to resolve the vehicle up front (we need it for rate lookup + trip creation)
+    vehicle = db.query(Vehicle).filter(Vehicle.plate_number == order.truck_plate).first()
+
+    # Prefer contract rate from the rate card; fall back to manual cases * price
+    calculated_total = (order.cases or 0) * (order.price_per_case or 0.0)
+    rate_from_card = None
+    if vehicle:
+        try:
+            rate_from_card = get_rate(
+                destination=order.destination,
+                truck_size=vehicle.size or "",
+                product_type=order.product_type or ""
+            )
+        except ValueError:
+            # Keep going even if the lane is missing on the rate card
+            rate_from_card = None
+
+    effective_total = rate_from_card if rate_from_card is not None else calculated_total
+
     # Create order
-    # Treat `cases` as Offloading Charges (KES) and `price_per_case` as Mileage Charge (KES)
-    # These amounts should NOT affect any calculations. Keep total at 0 for new orders.
-    calculated_total = 0.0
     db_order = Order(
         order_number=order.order_number,
         invoice_number=none_if_blank(order.invoice_number),
@@ -52,7 +68,7 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         price_per_case=order.price_per_case,
         fuel_litres=order.fuel_litres,
         driver_details=none_if_blank(order.driver_details),
-        total_amount=calculated_total,
+        total_amount=effective_total,
         dispatch_note=none_if_blank(order.dispatch_note_number)
     )
 
@@ -68,17 +84,8 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_order)
 
-    # Look up vehicle by plate
-    vehicle = db.query(Vehicle).filter(Vehicle.plate_number == order.truck_plate).first()
-
     # Prepare revenue (owner pay) from rate card
-    rate = 0.0
-    if vehicle:
-        rate = get_rate(
-            destination=order.destination,
-            truck_size=vehicle.size or "",
-            product_type=order.product_type or ""
-        )
+    rate = rate_from_card or 0.0
 
     # Auto-create Trip
     db_trip = Trip(
@@ -210,8 +217,12 @@ def get_orders(month: int = Query(None, ge=1, le=12), db: Session = Depends(get_
             vehicle = trip.vehicle
             driver = trip.driver
 
-            expenses_total = db.query(func.sum(Expense.amount)) \
-                .filter(Expense.trip_id == trip.id).scalar() or 0
+            expenses_total = (
+                db.query(func.sum(Expense.amount))
+                .filter(Expense.trip_id == trip.id, Expense.is_deleted.is_(False))
+                .scalar()
+                or 0
+            )
 
             commission_row = db.query(Commission).filter(Commission.trip_id == trip.id).first()
             commission_amount = commission_row.amount_paid if commission_row else 0

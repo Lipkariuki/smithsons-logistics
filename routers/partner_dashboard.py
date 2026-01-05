@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, extract
 from datetime import datetime
 from database import get_db
-from models import User, Trip, Vehicle, Order, Expense, Commission
+from models import User, Trip, Vehicle, Order, Expense, Commission, FuelExpense
 from routers.auth import get_current_user  # ✅ import auth helper
 
 router = APIRouter(prefix="/partner-dashboard", tags=["Partner Dashboard"])
@@ -30,15 +30,25 @@ def get_partner_dashboard_data(
         .filter(Vehicle.owner_id == owner_id)\
         .filter(Order.dispatch_note == None).scalar() or 0
 
-    expenses_total = db.query(func.sum(Expense.amount))\
-        .join(Trip).join(Vehicle)\
-        .filter(Vehicle.owner_id == owner_id).scalar() or 0
+    expenses_total = (
+        db.query(func.sum(Expense.amount))
+        .join(Trip)
+        .join(Vehicle)
+        .filter(Vehicle.owner_id == owner_id, Expense.is_deleted.is_(False))
+        .scalar()
+        or 0
+    )
 
     commission_total = db.query(func.sum(Commission.amount_paid))\
         .join(Trip).join(Vehicle)\
         .filter(Vehicle.owner_id == owner_id).scalar() or 0
 
-    net_earnings = total_revenue - expenses_total - commission_total
+    fuel_total = db.query(func.sum(FuelExpense.amount))\
+        .join(Trip, FuelExpense.trip_id == Trip.id)\
+        .join(Vehicle, Trip.vehicle_id == Vehicle.id)\
+        .filter(Vehicle.owner_id == owner_id).scalar() or 0
+
+    net_earnings = total_revenue - expenses_total - commission_total - fuel_total
 
     trips_completed = db.query(Trip).join(Vehicle)\
         .filter(Vehicle.owner_id == owner_id, Trip.status == "completed").count()
@@ -80,6 +90,7 @@ def get_partner_dashboard_data(
         "netEarnings": int(net_earnings),
         "expensesTotal": int(expenses_total),
         "commissionTotal": int(commission_total),
+        "fuelTotal": int(fuel_total),
         "tripsCompleted": trips_completed,
         "tripsOngoing": trips_ongoing,
         "idleVehicles": idle_vehicles,

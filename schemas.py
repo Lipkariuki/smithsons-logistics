@@ -159,6 +159,14 @@ class TripWithDriverVehicleOut(BaseModel):
     revenue: Optional[float] = 0.0
     model_config = ConfigDict(from_attributes=True)
 
+class TripRevenueUpdate(BaseModel):
+    revenue: float
+    reason: Optional[str] = None
+
+class TripRevenueOut(BaseModel):
+    trip_id: int
+    revenue: float
+
 class OrderWithTripAndDriverOut(BaseModel):
     id: int
     order_number: Optional[str] = None
@@ -225,6 +233,31 @@ class SimpleExpenseOut(BaseModel):
     description: Optional[str]
     timestamp: datetime
     trip_id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FuelExpenseBase(BaseModel):
+    fuel_type: str
+    price_per_litre: float
+    amount: float
+    litres: float
+
+
+class FuelExpenseCreate(FuelExpenseBase):
+    trip_id: Optional[int] = None
+
+
+class FuelExpenseUpdate(BaseModel):
+    fuel_type: Optional[str] = None
+    price_per_litre: Optional[float] = None
+    amount: Optional[float] = None
+    litres: Optional[float] = None
+
+
+class FuelExpenseOut(FuelExpenseBase):
+    trip_id: int
+    updated_by: Optional[int]
+    updated_at: Optional[datetime]
     model_config = ConfigDict(from_attributes=True)
 
 # =========================

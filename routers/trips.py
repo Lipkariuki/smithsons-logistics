@@ -1,10 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.orm import Session, joinedload
 from database import get_db
-from models import Trip, Vehicle, Order, User, Expense
-from schemas import TripCreate, TripOut, TripWithExpensesOut
+from models import Trip, Vehicle, Order, User, Expense, FuelExpense
+from schemas import (
+    TripCreate,
+    TripOut,
+    TripWithExpensesOut,
+    FuelExpenseCreate,
+    FuelExpenseUpdate,
+    FuelExpenseOut,
+    TripRevenueUpdate,
+    TripRevenueOut,
+)
 from typing import List
 from utils.rate_lookup import get_rate
+from routers.auth import require_role
 
 router = APIRouter(prefix="/trips", tags=["Trips"])
 
@@ -67,6 +77,153 @@ def list_trips(db: Session = Depends(get_db)):
 
     return result
 
+
+def _get_trip_or_404(db: Session, trip_id: int) -> Trip:
+    trip = db.query(Trip).filter(Trip.id == trip_id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found.")
+    return trip
+
+
+def _update_trip_revenue_value(
+    db: Session, trip_id: int, payload: TripRevenueUpdate
+) -> TripRevenueOut:
+    trip = _get_trip_or_404(db, trip_id)
+    try:
+        trip.revenue = float(payload.revenue)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid revenue value")
+    db.commit()
+    db.refresh(trip)
+    return TripRevenueOut(trip_id=trip.id, revenue=trip.revenue)
+
+
+@router.patch(
+    "/{trip_id}/revenue",
+    response_model=TripRevenueOut,
+    tags=["Trips"],
+)
+def patch_trip_revenue(
+    trip_id: int,
+    payload: TripRevenueUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    return _update_trip_revenue_value(db, trip_id, payload)
+
+
+@router.put(
+    "/{trip_id}/revenue",
+    response_model=TripRevenueOut,
+    tags=["Trips"],
+)
+def put_trip_revenue(
+    trip_id: int,
+    payload: TripRevenueUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    return _update_trip_revenue_value(db, trip_id, payload)
+
+
+@router.get(
+    "/{trip_id}/fuel",
+    response_model=FuelExpenseOut,
+    tags=["Trips"],
+)
+def get_trip_fuel(
+    trip_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    _get_trip_or_404(db, trip_id)
+    fuel = db.query(FuelExpense).filter(FuelExpense.trip_id == trip_id).first()
+    if not fuel:
+        raise HTTPException(status_code=404, detail="Fuel expense not found for this trip.")
+    return fuel
+
+
+@router.post(
+    "/{trip_id}/fuel",
+    response_model=FuelExpenseOut,
+    tags=["Trips"],
+)
+def upsert_trip_fuel(
+    trip_id: int,
+    payload: FuelExpenseCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    _get_trip_or_404(db, trip_id)
+    fuel = db.query(FuelExpense).filter(FuelExpense.trip_id == trip_id).first()
+    if fuel:
+        fuel.fuel_type = payload.fuel_type
+        fuel.price_per_litre = payload.price_per_litre
+        fuel.amount = payload.amount
+        fuel.litres = payload.litres
+        fuel.updated_by = current_user.id
+    else:
+        fuel = FuelExpense(
+            trip_id=trip_id,
+            fuel_type=payload.fuel_type,
+            price_per_litre=payload.price_per_litre,
+            amount=payload.amount,
+            litres=payload.litres,
+            updated_by=current_user.id,
+        )
+        db.add(fuel)
+    db.commit()
+    db.refresh(fuel)
+    return fuel
+
+
+@router.put(
+    "/{trip_id}/fuel",
+    response_model=FuelExpenseOut,
+    tags=["Trips"],
+)
+def update_trip_fuel(
+    trip_id: int,
+    payload: FuelExpenseUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    _get_trip_or_404(db, trip_id)
+    fuel = db.query(FuelExpense).filter(FuelExpense.trip_id == trip_id).first()
+    if not fuel:
+        raise HTTPException(status_code=404, detail="Fuel expense not found for this trip.")
+
+    if payload.fuel_type is not None:
+        fuel.fuel_type = payload.fuel_type
+    if payload.price_per_litre is not None:
+        fuel.price_per_litre = payload.price_per_litre
+    if payload.amount is not None:
+        fuel.amount = payload.amount
+    if payload.litres is not None:
+        fuel.litres = payload.litres
+    fuel.updated_by = current_user.id
+    db.commit()
+    db.refresh(fuel)
+    return fuel
+
+
+@router.delete(
+    "/{trip_id}/fuel",
+    status_code=204,
+    tags=["Trips"],
+)
+def delete_trip_fuel(
+    trip_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    _get_trip_or_404(db, trip_id)
+    fuel = db.query(FuelExpense).filter(FuelExpense.trip_id == trip_id).first()
+    if not fuel:
+        raise HTTPException(status_code=404, detail="Fuel expense not found for this trip.")
+    db.delete(fuel)
+    db.commit()
+
 @router.get("/{trip_id}/with-expenses", response_model=TripWithExpensesOut)
 def get_trip_with_expenses(trip_id: int, db: Session = Depends(get_db)):
     trip = db.query(Trip)\
@@ -81,7 +238,7 @@ def get_trip_with_expenses(trip_id: int, db: Session = Depends(get_db)):
 
     vehicle = trip.vehicle
     driver = trip.driver
-    expenses = trip.expenses
+    expenses = [exp for exp in trip.expenses if not getattr(exp, "is_deleted", False)]
     total_expense = sum(e.amount for e in expenses)
 
     return {
@@ -118,19 +275,22 @@ def get_trip_profit(trip_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Trip or order not found.")
 
     order = trip.order
-    expenses = trip.expenses
+    expenses = [exp for exp in trip.expenses if not getattr(exp, "is_deleted", False)]
     commission = trip.commission
 
     total_expenses = sum(e.amount for e in expenses)
     commission_amount = commission.amount_paid if commission else 0.0
     revenue = trip.revenue or 0.0
+    fuel = db.query(FuelExpense).filter(FuelExpense.trip_id == trip.id).first()
+    fuel_amount = fuel.amount if fuel else 0.0
 
-    net_profit = revenue - total_expenses - commission_amount
+    net_profit = revenue - total_expenses - commission_amount - fuel_amount
 
     return {
         "trip_id": trip.id,
         "revenue": revenue,
         "total_expenses": total_expenses,
         "commission_paid": commission_amount,
+        "fuel_expense": fuel_amount,
         "net_profit": net_profit
     }
