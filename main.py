@@ -24,6 +24,7 @@ from routers import (
 from dotenv import load_dotenv
 import os
 import re
+from passlib.context import CryptContext
 
 # ✅ Load environment variables
 load_dotenv()
@@ -107,6 +108,26 @@ def startup():
                 ALTER TABLE orders
                 ADD COLUMN IF NOT EXISTS driver_details VARCHAR(255)
             """))
+            # Idempotent seed: ensure a few driver accounts exist for fresh deploys
+            try:
+                pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+                default_pw = pwd.hash("driverpass123")
+                drivers = [
+                    {"name": "Stephen Maina", "phone": "+254711000201", "email": "stephen.maina@example.com"},
+                    {"name": "Robert Mwangi", "phone": "+254711000202", "email": "robert.mwangi@example.com"},
+                    {"name": "Kelvin Odur", "phone": "+254711000203", "email": "kelvin.odur@example.com"},
+                    {"name": "John Ochieng", "phone": "+254711000204", "email": "john.ochieng@example.com"},
+                    {"name": "Daniel Kairithia", "phone": "+254711000205", "email": "daniel.kairithia@example.com"},
+                ]
+                for d in drivers:
+                    conn.execute(text("""
+                        INSERT INTO users (name, email, phone, password_hash, role)
+                        SELECT :name, :email, :phone, :pw, 'driver'
+                        WHERE NOT EXISTS (SELECT 1 FROM users WHERE phone = :phone)
+                    """), {"name": d["name"], "email": d["email"], "phone": d["phone"], "pw": default_pw})
+            except Exception:
+                # Don't block startup on seeding errors
+                pass
     except Exception:
         # Avoid blocking app startup if cleanup fails; logs are visible in platform
         pass
