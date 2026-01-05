@@ -153,11 +153,11 @@ def create_admin():
             return
 
         new_admin = User(
-            name="PHIL test",
+            name="PHIL Admin",
             email="philqaris@gmail.com",
             phone=new_phone,
             password_hash=pwd_context.hash("adminpass456"),
-            role="owner"
+            role="admin"
         )
         db.add(new_admin)
         db.commit()
@@ -175,3 +175,43 @@ def create_admin():
 
 if __name__ == "__main__":
     create_admin()
+
+
+def create_specified_drivers():
+    db = SessionLocal()
+    drivers = [
+        {"name": "Stephen Maina", "phone": "+254711000201", "email": "stephen.maina@example.com"},
+        {"name": "Robert Mwangi", "phone": "+254711000202", "email": "robert.mwangi@example.com"},
+        {"name": "Kelvin Odur", "phone": "+254711000203", "email": "kelvin.odur@example.com"},
+        {"name": "John Ochieng", "phone": "+254711000204", "email": "john.ochieng@example.com"},
+        {"name": "Daniel Kairithia", "phone": "+254711000205", "email": "daniel.kairithia@example.com"},
+    ]
+
+    try:
+        for d in drivers:
+            exists = db.query(User).filter(User.phone == d["phone"]).first()
+            if exists:
+                print(f"⚠️ Driver already exists: {d['name']} ({d['phone']})")
+                continue
+
+            new_driver = User(
+                name=d["name"],
+                email=d["email"],
+                phone=d["phone"],
+                password_hash=pwd_context.hash("driverpass123"),
+                role="driver",
+            )
+            db.add(new_driver)
+
+        db.commit()
+        print("✅ Specified drivers created (where not existing).")
+    except Exception as e:
+        db.rollback()
+        print("❌ Error creating specified drivers:", str(e))
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    # create admin already ran above; now add drivers
+    create_specified_drivers()

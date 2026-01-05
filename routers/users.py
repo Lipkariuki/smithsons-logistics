@@ -8,6 +8,7 @@ from models import User
 from database import get_db
 from schemas import UserCreate, UserOut
 from routers.auth import get_current_user, require_role
+from fastapi import Body
 
 
 

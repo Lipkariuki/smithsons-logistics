@@ -1,5 +1,5 @@
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, List
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Optional, List, Literal
 from datetime import datetime, date
 
 # =========================
@@ -11,14 +11,14 @@ class UserCreate(BaseModel):
     phone: str
     email: Optional[str] = None
     password: str
-    role: str = "owner"
+    role: Literal["admin", "owner", "driver"] = Field("owner")
 
 class UserOut(BaseModel):
     id: int
     name: str
     email: Optional[str] = None
     phone: Optional[str] = None
-    role: str
+    role: Literal["admin", "owner", "driver"]
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 class Token(BaseModel):

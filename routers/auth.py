@@ -103,11 +103,27 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
-def require_role(role: str):
+def require_role(required):
+    """Return a dependency that ensures the current user has the required role.
+
+    `required` may be a single role string or an iterable of allowed roles.
+    """
     def role_checker(current_user: User = Depends(get_current_user)):
-        if current_user.role != role:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # allow both a single role or a collection of roles
+        try:
+            is_collection = not isinstance(required, (str, bytes)) and hasattr(required, "__iter__")
+        except Exception:
+            is_collection = False
+
+        if is_collection:
+            if current_user.role not in required:
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+        else:
+            if current_user.role != required:
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+
         return current_user
+
     return role_checker
 
 
