@@ -352,3 +352,78 @@ class VehicleReportOut(BaseModel):
     actual_payment: Optional[float] = None
     variance: Optional[float] = None
     notes: Optional[str] = None
+
+
+# =========================
+# DHL REPORTS & PAYSLIPS
+# =========================
+
+
+class DHLOrderOut(BaseModel):
+    id: int
+    ref_no: str
+    invoice_no: Optional[str] = None
+    date: date
+    truck_plate: str
+    vehicle_id: Optional[int] = None
+    distribution_cost: float
+    offloading_cost: float
+    total_revenue: float
+    description: Optional[str] = None
+    lane_description: Optional[str] = None
+    depot: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DHLSummaryOut(BaseModel):
+    vehicle_id: Optional[int] = None
+    plate_number: str
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
+    owner_phone: Optional[str] = None
+    order_count: int
+    distribution_cost: float
+    offloading_cost: float
+    total_revenue: float
+    total_expenses: Optional[float] = None
+    net_pay: Optional[float] = None
+
+
+class DHLPayslipExpenseIn(BaseModel):
+    name: str
+    amount: float
+
+
+class DHLPayslipExpenseOut(BaseModel):
+    id: int
+    name: str
+    amount: float
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DHLPayslipOut(BaseModel):
+    id: int
+    vehicle_id: int
+    period_start: date
+    period_end: date
+    total_revenue: float
+    commission_rate: float
+    commission_amount: float
+    total_expenses: float
+    net_pay: float
+    sent_at: Optional[datetime] = None
+    expenses: List[DHLPayslipExpenseOut] = []
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DHLPayslipCreate(BaseModel):
+    vehicle_id: int
+    period_start: date
+    period_end: date
+    commission_rate: Optional[float] = None
+    expenses: Optional[List[DHLPayslipExpenseIn]] = None
+
+
+class DHLPayslipUpdate(BaseModel):
+    expenses: Optional[List[DHLPayslipExpenseIn]] = None
+    commission_rate: Optional[float] = None
