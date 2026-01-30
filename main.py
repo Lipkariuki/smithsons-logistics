@@ -19,7 +19,8 @@ from routers import (
     driver_expense,
     rates,
     metadata,
-    reports
+    reports,
+    dhl_reports,
 )
 from dotenv import load_dotenv
 import os
@@ -44,7 +45,7 @@ allow_origins = [o.strip() for o in env_origins.split(",") if o.strip()] or defa
 
 allow_origin_regex = os.getenv(
     "CORS_ORIGIN_REGEX",
-    r"^https?:\/\/([a-z0-9-]+\.)*smithsons\.co\.ke$",
+    r"^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$|^https?:\/\/([a-z0-9-]+\.)*smithsons\.co\.ke$",
 ).strip()
 
 app.add_middleware(
@@ -72,6 +73,7 @@ app.include_router(rates.router, tags=["Rates"])
 app.include_router(driver_expense.router)
 app.include_router(metadata.router)
 app.include_router(reports.router)
+app.include_router(dhl_reports.router)
 
 @app.on_event("startup")
 def startup():
