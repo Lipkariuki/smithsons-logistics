@@ -10,6 +10,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Date,
     Boolean,
+    LargeBinary,
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -158,3 +159,72 @@ class OwnerReconciliation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     vehicle = relationship("Vehicle")
+
+
+class DHLOrder(Base):
+    __tablename__ = "dhl_orders"
+    __table_args__ = (
+        UniqueConstraint("ref_no", "truck_plate", "date", name="uq_dhl_ref_plate_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    ref_no = Column(String, nullable=False, index=True)
+    invoice_no = Column(String, nullable=True)
+    date = Column(Date, nullable=False, index=True)
+    truck_plate = Column(String, nullable=False, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True, index=True)
+    distribution_cost = Column(Float, default=0.0)
+    offloading_cost = Column(Float, default=0.0)
+    total_revenue = Column(Float, default=0.0)
+    description = Column(Text, nullable=True)
+    lane_description = Column(Text, nullable=True)
+    depot = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    vehicle = relationship("Vehicle")
+
+
+class DHLPayslip(Base):
+    __tablename__ = "dhl_payslips"
+    __table_args__ = (
+        UniqueConstraint("vehicle_id", "period_start", "period_end", name="uq_dhl_vehicle_period"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    total_revenue = Column(Float, default=0.0)
+    commission_rate = Column(Float, default=0.07)
+    commission_amount = Column(Float, default=0.0)
+    total_expenses = Column(Float, default=0.0)
+    net_pay = Column(Float, default=0.0)
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    vehicle = relationship("Vehicle")
+    expenses = relationship("DHLPayslipExpense", back_populates="payslip", cascade="all, delete-orphan")
+    document = relationship("DHLPayslipDocument", back_populates="payslip", uselist=False, cascade="all, delete-orphan")
+
+
+class DHLPayslipExpense(Base):
+    __tablename__ = "dhl_payslip_expenses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payslip_id = Column(Integer, ForeignKey("dhl_payslips.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    amount = Column(Float, default=0.0)
+
+    payslip = relationship("DHLPayslip", back_populates="expenses")
+
+
+class DHLPayslipDocument(Base):
+    __tablename__ = "dhl_payslip_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payslip_id = Column(Integer, ForeignKey("dhl_payslips.id"), unique=True, nullable=False, index=True)
+    pdf_bytes = Column(LargeBinary, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    payslip = relationship("DHLPayslip", back_populates="document")
