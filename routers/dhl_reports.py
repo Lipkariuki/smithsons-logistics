@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -133,13 +134,23 @@ def _generate_payslip_pdf(payslip: DHLPayslip, vehicle: Vehicle) -> bytes:
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
 
+    logo_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "assets", "smithsons-logo.svg")
+    )
+    try:
+        pdf.image(logo_path, x=14, y=12, w=12, h=12)
+    except Exception:
+        pass
+
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 10, "SMITHSONS LOGISTICS", ln=True, align="C")
+    pdf.cell(0, 8, "Smithsons Logistics", ln=True, align="C")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, "Powering Every Trip. Empowering Every Partner.", ln=True, align="C")
     pdf.set_font("Helvetica", "", 11)
     pdf.cell(0, 6, _latin1("DHL Partner Payslip"), ln=True, align="C")
     pdf.set_draw_color(60, 60, 60)
     pdf.set_line_width(0.5)
-    pdf.line(15, 30, 195, 30)
+    pdf.line(15, 34, 195, 34)
 
     pdf.ln(6)
     pdf.set_font("Helvetica", "", 10)
@@ -472,6 +483,7 @@ def download_payslip_pdf(
         pdf_bytes = bytes(payslip.document.pdf_bytes)
     else:
         pdf_bytes = _generate_payslip_pdf(payslip, payslip.vehicle)
+    pdf_bytes = bytes(pdf_bytes)
     filename = f"dhl_payslip_{payslip.vehicle.plate_number}_{payslip.period_start}.pdf"
     return Response(
         pdf_bytes,
