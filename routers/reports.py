@@ -378,6 +378,7 @@ def send_vehicle_report(payload: SendReportPayload, db: Session = Depends(get_db
 
     message_lines = [
         f"Dear {report.owner_name.split()[0] if report.owner_name else 'Partner'},",
+        f"Date: {date.today().isoformat()}",
         f"{report.plate_number} ({start.isoformat()} to {end.isoformat()}):",
         f"Trips: {report.trip_count}",
         f"Gross: Ksh {report.gross_revenue:,.2f}",
