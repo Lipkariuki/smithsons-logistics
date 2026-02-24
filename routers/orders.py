@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import datetime
+from datetime import date, datetime
 from database import get_db
 from utils.rate_lookup import get_rate
 from utils.sms import send_sms  # ✅ Add this
@@ -22,6 +22,16 @@ def _normalize_optional_string(value: str | None):
         return None
     value = value.strip()
     return value if value else None
+
+
+def _format_sms_date(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
 
 
 @router.post("/", response_model=OrderOut)
@@ -113,9 +123,12 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
         first_name = owner_name.split()[0]
 
         destination = order.destination or "the destination"
+        trip_date = _format_sms_date(order.date)
         message_parts = [
             f"Dear {first_name}, Truck Regd. {vehicle.plate_number} has been assigned a trip to {destination}.",
         ]
+        if trip_date:
+            message_parts.append(f"Date: {trip_date}.")
 
         if offloading:
             message_parts.append(f"An offloading charge of Ksh {offloading:,.0f} will apply.")
