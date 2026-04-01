@@ -389,6 +389,34 @@ class DHLSummaryOut(BaseModel):
     net_pay: Optional[float] = None
 
 
+class DHLReconciliationRowOut(BaseModel):
+    vehicle_id: Optional[int] = None
+    plate_number: str
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
+    internal_order_count: int
+    dhl_order_count: int
+    order_count_difference: int
+    internal_revenue: float
+    dhl_revenue: float
+    revenue_difference: float
+    matched: bool
+
+
+class DHLReconciliationSummaryOut(BaseModel):
+    period_start: date
+    period_end: date
+    internal_order_count: int
+    dhl_order_count: int
+    order_count_difference: int
+    internal_revenue: float
+    dhl_revenue: float
+    revenue_difference: float
+    matched_vehicle_count: int
+    mismatched_vehicle_count: int
+    rows: List[DHLReconciliationRowOut]
+
+
 class DHLPayslipExpenseIn(BaseModel):
     name: str
     amount: float

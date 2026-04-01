@@ -26,6 +26,8 @@ from models import (
 from routers.auth import require_role
 from schemas import (
     DHLOrderOut,
+    DHLReconciliationSummaryOut,
+    DHLReconciliationRowOut,
     DHLSummaryOut,
     DHLPayslipCreate,
     DHLPayslipOut,
@@ -126,6 +128,10 @@ def _sum_dhl_revenue(db: Session, vehicle_id: int, start: date, end: date) -> fl
     return float(total or 0.0)
 
 
+def _normalize_plate(value: Optional[str]) -> str:
+    return (value or "").strip().replace(" ", "").upper()
+
+
 def _generate_payslip_pdf(payslip: DHLPayslip, vehicle: Vehicle) -> bytes:
     period_label = f"{payslip.period_start:%Y-%m-%d} to {payslip.period_end:%Y-%m-%d}"
     generated_on = datetime.utcnow().strftime("%Y-%m-%d")
@@ -208,7 +214,11 @@ def upload_dhl_report(
     if not content:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
 
-    result = import_dhl_report(db, content, replace=replace)
+    try:
+        result = import_dhl_report(db, content, replace=replace)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     return {
         "period_start": result.period_start,
         "period_end": result.period_end,
@@ -315,6 +325,167 @@ def dhl_summary(
 
     results.sort(key=lambda item: (item.owner_name or "", item.plate_number))
     return results
+
+
+@router.get("/reconciliation", response_model=DHLReconciliationSummaryOut)
+def dhl_reconciliation(
+    owner_id: Optional[int] = Query(None),
+    vehicle_id: Optional[int] = Query(None),
+    vehicle_plate: Optional[str] = Query(None),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    start, end = _default_dates(start_date, end_date)
+    start_dt, end_dt = _date_bounds(start, end)
+
+    plate_filter = _normalize_plate(vehicle_plate) if vehicle_plate else None
+
+    internal_query = (
+        db.query(
+            Vehicle.id.label("vehicle_id"),
+            Vehicle.plate_number.label("plate_number"),
+            Vehicle.owner_id.label("owner_id"),
+            User.name.label("owner_name"),
+            func.count(Trip.id).label("internal_order_count"),
+            func.coalesce(func.sum(Trip.revenue), 0.0).label("internal_revenue"),
+        )
+        .join(Trip, Trip.vehicle_id == Vehicle.id)
+        .join(User, Vehicle.owner_id == User.id)
+        .outerjoin(Order, Trip.order_id == Order.id)
+        .filter(
+            or_(
+                and_(Order.date >= start_dt, Order.date < end_dt),
+                and_(Order.id.is_(None), Trip.created_at >= start_dt, Trip.created_at < end_dt),
+            )
+        )
+    )
+
+    if owner_id:
+        internal_query = internal_query.filter(Vehicle.owner_id == owner_id)
+    if vehicle_id:
+        internal_query = internal_query.filter(Vehicle.id == vehicle_id)
+    if plate_filter:
+        internal_query = internal_query.filter(func.replace(func.upper(Vehicle.plate_number), " ", "") == plate_filter)
+
+    internal_rows = (
+        internal_query.group_by(Vehicle.id, Vehicle.plate_number, Vehicle.owner_id, User.name).all()
+    )
+
+    dhl_query = (
+        db.query(
+            func.coalesce(DHLOrder.vehicle_id, Vehicle.id).label("vehicle_id"),
+            func.coalesce(Vehicle.plate_number, DHLOrder.truck_plate).label("plate_number"),
+            Vehicle.owner_id.label("owner_id"),
+            User.name.label("owner_name"),
+            func.count(DHLOrder.id).label("dhl_order_count"),
+            func.coalesce(func.sum(DHLOrder.total_revenue), 0.0).label("dhl_revenue"),
+        )
+        .outerjoin(Vehicle, Vehicle.id == DHLOrder.vehicle_id)
+        .outerjoin(User, Vehicle.owner_id == User.id)
+        .filter(DHLOrder.date >= start, DHLOrder.date <= end)
+    )
+
+    if owner_id:
+        dhl_query = dhl_query.filter(Vehicle.owner_id == owner_id)
+    if vehicle_id:
+        dhl_query = dhl_query.filter(DHLOrder.vehicle_id == vehicle_id)
+    if plate_filter:
+        dhl_query = dhl_query.filter(func.replace(func.upper(DHLOrder.truck_plate), " ", "") == plate_filter)
+
+    dhl_rows = dhl_query.group_by(
+        DHLOrder.vehicle_id, Vehicle.id, Vehicle.plate_number, DHLOrder.truck_plate, Vehicle.owner_id, User.name
+    ).all()
+
+    results_by_plate: dict[str, dict] = {}
+
+    for row in internal_rows:
+        plate = _normalize_plate(row.plate_number)
+        results_by_plate.setdefault(
+            plate,
+            {
+                "vehicle_id": row.vehicle_id,
+                "plate_number": row.plate_number,
+                "owner_id": row.owner_id,
+                "owner_name": row.owner_name,
+                "internal_order_count": 0,
+                "dhl_order_count": 0,
+                "internal_revenue": 0.0,
+                "dhl_revenue": 0.0,
+            },
+        )
+        results_by_plate[plate]["internal_order_count"] = int(row.internal_order_count or 0)
+        results_by_plate[plate]["internal_revenue"] = float(row.internal_revenue or 0.0)
+
+    for row in dhl_rows:
+        plate = _normalize_plate(row.plate_number)
+        results_by_plate.setdefault(
+            plate,
+            {
+                "vehicle_id": row.vehicle_id,
+                "plate_number": row.plate_number,
+                "owner_id": row.owner_id,
+                "owner_name": row.owner_name,
+                "internal_order_count": 0,
+                "dhl_order_count": 0,
+                "internal_revenue": 0.0,
+                "dhl_revenue": 0.0,
+            },
+        )
+        current = results_by_plate[plate]
+        if current["vehicle_id"] is None and row.vehicle_id is not None:
+            current["vehicle_id"] = row.vehicle_id
+        if not current["plate_number"]:
+            current["plate_number"] = row.plate_number
+        if current["owner_id"] is None and row.owner_id is not None:
+            current["owner_id"] = row.owner_id
+        if not current["owner_name"] and row.owner_name:
+            current["owner_name"] = row.owner_name
+        current["dhl_order_count"] = int(row.dhl_order_count or 0)
+        current["dhl_revenue"] = float(row.dhl_revenue or 0.0)
+
+    rows: list[DHLReconciliationRowOut] = []
+    for item in results_by_plate.values():
+        order_count_difference = item["internal_order_count"] - item["dhl_order_count"]
+        revenue_difference = item["internal_revenue"] - item["dhl_revenue"]
+        matched = order_count_difference == 0 and abs(revenue_difference) < 0.01
+        rows.append(
+            DHLReconciliationRowOut(
+                vehicle_id=item["vehicle_id"],
+                plate_number=item["plate_number"],
+                owner_id=item["owner_id"],
+                owner_name=item["owner_name"],
+                internal_order_count=item["internal_order_count"],
+                dhl_order_count=item["dhl_order_count"],
+                order_count_difference=order_count_difference,
+                internal_revenue=round(item["internal_revenue"], 2),
+                dhl_revenue=round(item["dhl_revenue"], 2),
+                revenue_difference=round(revenue_difference, 2),
+                matched=matched,
+            )
+        )
+
+    rows.sort(key=lambda item: ((item.owner_name or "").lower(), item.plate_number))
+
+    internal_total_orders = sum(item.internal_order_count for item in rows)
+    dhl_total_orders = sum(item.dhl_order_count for item in rows)
+    internal_total_revenue = round(sum(item.internal_revenue for item in rows), 2)
+    dhl_total_revenue = round(sum(item.dhl_revenue for item in rows), 2)
+
+    return DHLReconciliationSummaryOut(
+        period_start=start,
+        period_end=end,
+        internal_order_count=internal_total_orders,
+        dhl_order_count=dhl_total_orders,
+        order_count_difference=internal_total_orders - dhl_total_orders,
+        internal_revenue=internal_total_revenue,
+        dhl_revenue=dhl_total_revenue,
+        revenue_difference=round(internal_total_revenue - dhl_total_revenue, 2),
+        matched_vehicle_count=sum(1 for item in rows if item.matched),
+        mismatched_vehicle_count=sum(1 for item in rows if not item.matched),
+        rows=rows,
+    )
 
 
 @router.post("/payslips", response_model=DHLPayslipOut)
