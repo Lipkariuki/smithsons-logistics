@@ -401,6 +401,8 @@ class DHLReconciliationRowOut(BaseModel):
     dhl_revenue: float
     revenue_difference: float
     matched: bool
+    internal_only_order_numbers: List[str] = []
+    dhl_only_order_numbers: List[str] = []
 
 
 class DHLReconciliationSummaryOut(BaseModel):

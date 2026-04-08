@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import csv
-import io
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
@@ -42,18 +40,6 @@ def _date_bounds(start: date, end: date) -> tuple[datetime, datetime]:
     start_dt = datetime.combine(start, time.min)
     end_dt = datetime.combine(end + timedelta(days=1), time.min)
     return start_dt, end_dt
-
-
-def _parse_float(value: Optional[str]) -> float:
-    if value is None:
-        return 0.0
-    text = value.strip()
-    if not text:
-        return 0.0
-    try:
-        return float(text)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid numeric value: '{value}'") from exc
 
 
 def _resolve_vehicle_ids(
@@ -418,126 +404,4 @@ def download_vehicle_report_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@router.post("/reconciliation/upload")
-async def upload_reconciliation(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    raw = await file.read()
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail="Unable to decode CSV file. Use UTF-8 encoding.") from exc
-
-    reader = csv.DictReader(io.StringIO(text))
-    required = {"vehicle_plate", "period_start", "period_end"}
-    if not required.issubset(reader.fieldnames or []):
-        raise HTTPException(
-            status_code=400,
-            detail=f"CSV must include headers: {', '.join(sorted(required))}",
-        )
-
-    created = 0
-    updated = 0
-    skipped = 0
-    errors: list[str] = []
-
-    for idx, row in enumerate(reader, start=2):
-        plate = row.get("vehicle_plate", "") or ""
-        if not plate.strip():
-            skipped += 1
-            errors.append(f"Row {idx}: missing vehicle_plate")
-            continue
-
-        norm_plate = _normalize_plate(plate)
-        vehicle = (
-            db.query(Vehicle)
-            .filter(Vehicle.plate_number.in_({plate.strip().upper(), norm_plate}))
-            .first()
-        )
-        if not vehicle:
-            skipped += 1
-            errors.append(f"Row {idx}: vehicle '{plate}' not found")
-            continue
-
-        def parse_date(field: str) -> date:
-            value = row.get(field)
-            if not value:
-                raise ValueError(f"{field} is required")
-            return datetime.strptime(value.strip(), "%Y-%m-%d").date()
-
-        try:
-            start = parse_date("period_start")
-            end = parse_date("period_end")
-        except ValueError as exc:
-            skipped += 1
-            errors.append(f"Row {idx}: {exc}")
-            continue
-
-        fuel_cost = _parse_float(row.get("fuel_cost"))
-        extra_expenses = _parse_float(row.get("extra_expenses"))
-        commission_adjustment = _parse_float(row.get("commission_adjustment"))
-        actual_payment = row.get("actual_payment")
-        actual_payment_value = None
-        if actual_payment and actual_payment.strip():
-            try:
-                actual_payment_value = float(actual_payment.strip())
-            except ValueError:
-                skipped += 1
-                errors.append(f"Row {idx}: invalid actual_payment value '{actual_payment}'")
-                continue
-
-        notes = (row.get("notes") or "").strip() or None
-
-        existing = (
-            db.query(OwnerReconciliation)
-            .filter(
-                OwnerReconciliation.vehicle_id == vehicle.id,
-                OwnerReconciliation.period_start == start,
-                OwnerReconciliation.period_end == end,
-            )
-            .first()
-        )
-
-        if existing:
-            existing.fuel_cost = fuel_cost
-            existing.extra_expenses = extra_expenses
-            existing.commission_adjustment = commission_adjustment
-            existing.actual_payment = actual_payment_value
-            existing.notes = notes
-            updated += 1
-        else:
-            record = OwnerReconciliation(
-                vehicle_id=vehicle.id,
-                period_start=start,
-                period_end=end,
-                fuel_cost=fuel_cost,
-                extra_expenses=extra_expenses,
-                commission_adjustment=commission_adjustment,
-                actual_payment=actual_payment_value,
-                notes=notes,
-            )
-            db.add(record)
-            created += 1
-
-    db.commit()
-
-    return {
-        "created": created,
-        "updated": updated,
-        "skipped": skipped,
-        "errors": errors,
-    }
-
-
-@router.get("/reconciliation/template")
-def download_template():
-    csv_template = (
-        "vehicle_plate,period_start,period_end,fuel_cost,extra_expenses,commission_adjustment,actual_payment,notes\n"
-        'KAA123X,2025-01-01,2025-01-31,15000,2500,0,98000,"Example note about manual adjustments"\n'
-    )
-    return Response(
-        content=csv_template,
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="owner_reconciliation_template.csv"'},
     )

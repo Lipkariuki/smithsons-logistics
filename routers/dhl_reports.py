@@ -132,6 +132,10 @@ def _normalize_plate(value: Optional[str]) -> str:
     return (value or "").strip().replace(" ", "").upper()
 
 
+def _normalize_reference(value: Optional[str]) -> str:
+    return (value or "").strip().replace(" ", "").upper()
+
+
 def _generate_payslip_pdf(payslip: DHLPayslip, vehicle: Vehicle) -> bytes:
     period_label = f"{payslip.period_start:%Y-%m-%d} to {payslip.period_end:%Y-%m-%d}"
     generated_on = datetime.utcnow().strftime("%Y-%m-%d")
@@ -373,6 +377,28 @@ def dhl_reconciliation(
         internal_query.group_by(Vehicle.id, Vehicle.plate_number, Vehicle.owner_id, User.name).all()
     )
 
+    internal_order_rows = (
+        db.query(
+            Vehicle.id.label("vehicle_id"),
+            Vehicle.plate_number.label("plate_number"),
+            Order.order_number.label("order_number"),
+        )
+        .join(Trip, Trip.vehicle_id == Vehicle.id)
+        .join(Order, Trip.order_id == Order.id)
+        .filter(Order.date >= start_dt, Order.date < end_dt)
+    )
+
+    if owner_id:
+        internal_order_rows = internal_order_rows.filter(Vehicle.owner_id == owner_id)
+    if vehicle_id:
+        internal_order_rows = internal_order_rows.filter(Vehicle.id == vehicle_id)
+    if plate_filter:
+        internal_order_rows = internal_order_rows.filter(
+            func.replace(func.upper(Vehicle.plate_number), " ", "") == plate_filter
+        )
+
+    internal_order_rows = internal_order_rows.all()
+
     dhl_query = (
         db.query(
             func.coalesce(DHLOrder.vehicle_id, Vehicle.id).label("vehicle_id"),
@@ -398,6 +424,25 @@ def dhl_reconciliation(
         DHLOrder.vehicle_id, Vehicle.id, Vehicle.plate_number, DHLOrder.truck_plate, Vehicle.owner_id, User.name
     ).all()
 
+    dhl_order_rows = (
+        db.query(
+            func.coalesce(DHLOrder.vehicle_id, Vehicle.id).label("vehicle_id"),
+            func.coalesce(Vehicle.plate_number, DHLOrder.truck_plate).label("plate_number"),
+            DHLOrder.ref_no.label("ref_no"),
+        )
+        .outerjoin(Vehicle, Vehicle.id == DHLOrder.vehicle_id)
+        .filter(DHLOrder.date >= start, DHLOrder.date <= end)
+    )
+
+    if owner_id:
+        dhl_order_rows = dhl_order_rows.filter(Vehicle.owner_id == owner_id)
+    if vehicle_id:
+        dhl_order_rows = dhl_order_rows.filter(DHLOrder.vehicle_id == vehicle_id)
+    if plate_filter:
+        dhl_order_rows = dhl_order_rows.filter(func.replace(func.upper(DHLOrder.truck_plate), " ", "") == plate_filter)
+
+    dhl_order_rows = dhl_order_rows.all()
+
     results_by_plate: dict[str, dict] = {}
 
     for row in internal_rows:
@@ -413,6 +458,8 @@ def dhl_reconciliation(
                 "dhl_order_count": 0,
                 "internal_revenue": 0.0,
                 "dhl_revenue": 0.0,
+                "internal_order_numbers": set(),
+                "dhl_order_numbers": set(),
             },
         )
         results_by_plate[plate]["internal_order_count"] = int(row.internal_order_count or 0)
@@ -431,6 +478,8 @@ def dhl_reconciliation(
                 "dhl_order_count": 0,
                 "internal_revenue": 0.0,
                 "dhl_revenue": 0.0,
+                "internal_order_numbers": set(),
+                "dhl_order_numbers": set(),
             },
         )
         current = results_by_plate[plate]
@@ -445,11 +494,68 @@ def dhl_reconciliation(
         current["dhl_order_count"] = int(row.dhl_order_count or 0)
         current["dhl_revenue"] = float(row.dhl_revenue or 0.0)
 
+    for row in internal_order_rows:
+        plate = _normalize_plate(row.plate_number)
+        if not plate:
+            continue
+        results_by_plate.setdefault(
+            plate,
+            {
+                "vehicle_id": row.vehicle_id,
+                "plate_number": row.plate_number,
+                "owner_id": None,
+                "owner_name": None,
+                "internal_order_count": 0,
+                "dhl_order_count": 0,
+                "internal_revenue": 0.0,
+                "dhl_revenue": 0.0,
+                "internal_order_numbers": set(),
+                "dhl_order_numbers": set(),
+            },
+        )
+        reference = _normalize_reference(row.order_number)
+        if reference:
+            results_by_plate[plate]["internal_order_numbers"].add(reference)
+
+    for row in dhl_order_rows:
+        plate = _normalize_plate(row.plate_number)
+        if not plate:
+            continue
+        results_by_plate.setdefault(
+            plate,
+            {
+                "vehicle_id": row.vehicle_id,
+                "plate_number": row.plate_number,
+                "owner_id": None,
+                "owner_name": None,
+                "internal_order_count": 0,
+                "dhl_order_count": 0,
+                "internal_revenue": 0.0,
+                "dhl_revenue": 0.0,
+                "internal_order_numbers": set(),
+                "dhl_order_numbers": set(),
+            },
+        )
+        reference = _normalize_reference(row.ref_no)
+        if reference:
+            results_by_plate[plate]["dhl_order_numbers"].add(reference)
+
     rows: list[DHLReconciliationRowOut] = []
     for item in results_by_plate.values():
         order_count_difference = item["internal_order_count"] - item["dhl_order_count"]
         revenue_difference = item["internal_revenue"] - item["dhl_revenue"]
-        matched = order_count_difference == 0 and abs(revenue_difference) < 0.01
+        internal_only_order_numbers = sorted(
+            item["internal_order_numbers"] - item["dhl_order_numbers"]
+        )
+        dhl_only_order_numbers = sorted(
+            item["dhl_order_numbers"] - item["internal_order_numbers"]
+        )
+        matched = (
+            order_count_difference == 0
+            and abs(revenue_difference) < 0.01
+            and not internal_only_order_numbers
+            and not dhl_only_order_numbers
+        )
         rows.append(
             DHLReconciliationRowOut(
                 vehicle_id=item["vehicle_id"],
@@ -463,6 +569,8 @@ def dhl_reconciliation(
                 dhl_revenue=round(item["dhl_revenue"], 2),
                 revenue_difference=round(revenue_difference, 2),
                 matched=matched,
+                internal_only_order_numbers=internal_only_order_numbers,
+                dhl_only_order_numbers=dhl_only_order_numbers,
             )
         )
 
