@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
 from database import get_db
 from models import Expense, Trip, Order, Vehicle, FuelExpense
 from schemas import ExpenseCreate, ExpenseOut, ExpenseListResponse, ExpenseListItem
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
 
@@ -73,6 +73,9 @@ def delete_expense(expense_id: int, db: Session = Depends(get_db)):
 def get_expenses(
     page: int = 1,
     per_page: int = 25,
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    kind: str = Query("all", pattern="^(all|fuel|other)$"),
     db: Session = Depends(get_db),
 ):
     if page < 1:
@@ -143,6 +146,7 @@ def get_expenses(
             "order_number": order_number,
             "vehicle_plate": row.vehicle_plate,
             "destination": row.destination,
+            "kind": "other",
         })
 
     for row in fuel_rows:
@@ -173,7 +177,19 @@ def get_expenses(
             "order_number": order_number,
             "vehicle_plate": row.vehicle_plate,
             "destination": row.destination,
+            "kind": "fuel",
         })
+
+    if start_date or end_date:
+        start_dt = datetime.combine(start_date or date.min, time.min)
+        end_dt = datetime.combine((end_date or date.max) + timedelta(days=1), time.min)
+        combined = [
+            row for row in combined
+            if row["timestamp"] and start_dt <= row["timestamp"] < end_dt
+        ]
+
+    if kind != "all":
+        combined = [row for row in combined if row["kind"] == kind]
 
     combined.sort(key=lambda r: (r["timestamp"] or datetime.min, r["id"]), reverse=True)
 
