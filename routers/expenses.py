@@ -9,6 +9,13 @@ from datetime import date, datetime, time, timedelta
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
 
+
+def _looks_like_fuel(description: str | None) -> bool:
+    if not description:
+        return False
+    lowered = description.lower()
+    return "fuel" in lowered or "diesel" in lowered or "petrol" in lowered
+
 @router.post("/", response_model=ExpenseOut)
 def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db)):
     # Accept either trip_id or order_number; require at least one
@@ -146,7 +153,7 @@ def get_expenses(
             "order_number": order_number,
             "vehicle_plate": row.vehicle_plate,
             "destination": row.destination,
-            "kind": "other",
+            "kind": "fuel" if _looks_like_fuel(row.description) else "other",
         })
 
     for row in fuel_rows:
