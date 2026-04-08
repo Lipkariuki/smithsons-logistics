@@ -134,6 +134,7 @@ def get_expenses(
     )
 
     combined = []
+    trip_ids_with_fuel_records = {row.trip_id for row in fuel_rows if row.trip_id is not None}
     for row in expense_rows:
         if row.order_number:
             order_number = row.order_number
@@ -144,6 +145,10 @@ def get_expenses(
         else:
             order_number = None
 
+        looks_like_fuel = _looks_like_fuel(row.description)
+        if looks_like_fuel and row.trip_id in trip_ids_with_fuel_records:
+            continue
+
         combined.append({
             "id": row.id,
             "trip_id": row.trip_id,
@@ -153,7 +158,7 @@ def get_expenses(
             "order_number": order_number,
             "vehicle_plate": row.vehicle_plate,
             "destination": row.destination,
-            "kind": "fuel" if _looks_like_fuel(row.description) else "other",
+            "kind": "fuel" if looks_like_fuel else "other",
         })
 
     for row in fuel_rows:
