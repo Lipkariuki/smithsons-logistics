@@ -163,6 +163,14 @@ def assign_driver(order_id: int, driver_id: int, db: Session = Depends(get_db)):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
+    driver = db.query(User).filter(
+        User.id == driver_id,
+        User.role == "driver",
+        User.is_active.is_(True),
+    ).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Active driver not found")
+
     trip = db.query(Trip).filter(Trip.order_id == order_id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")

@@ -13,12 +13,22 @@ class UserCreate(BaseModel):
     password: str
     role: Literal["admin", "owner", "driver"] = Field("owner")
 
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[Literal["admin", "owner", "driver"]] = None
+    is_active: Optional[bool] = None
+
 class UserOut(BaseModel):
     id: int
     name: str
     email: Optional[str] = None
     phone: Optional[str] = None
     role: Literal["admin", "owner", "driver"]
+    is_active: bool = True
+    deleted_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 class Token(BaseModel):

@@ -109,6 +109,19 @@ def startup():
                 ALTER TABLE orders
                 ADD COLUMN IF NOT EXISTS driver_details VARCHAR(255)
             """))
+            conn.execute(text("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true
+            """))
+            conn.execute(text("""
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL
+            """))
+            conn.execute(text("""
+                UPDATE users
+                SET is_active = true
+                WHERE is_active IS NULL
+            """))
     except Exception:
         # Avoid blocking app startup if cleanup fails; logs are visible in platform
         pass
