@@ -28,9 +28,13 @@ def create_trip(trip: TripCreate, db: Session = Depends(get_db)):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found.")
 
-    driver = db.query(User).filter(User.id == trip.driver_id, User.role == "driver").first()
+    driver = db.query(User).filter(
+        User.id == trip.driver_id,
+        User.role == "driver",
+        User.is_active.is_(True),
+    ).first()
     if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found.")
+        raise HTTPException(status_code=404, detail="Active driver not found.")
 
     rate = get_rate(
         destination=order.destination,

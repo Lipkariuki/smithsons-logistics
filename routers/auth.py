@@ -95,7 +95,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
 
     user = db.query(User).filter(User.id == int(user_id)).first()
-    if user is None:
+    if user is None or not getattr(user, "is_active", True):
         print("❌ No user found with ID:", user_id)
         raise credentials_exception
 
@@ -141,7 +141,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         )
         .first()
     )
-    if not user or not verify_password(form_data.password, user.password_hash):
+    if not user or not getattr(user, "is_active", True) or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     access_token = create_access_token(data={

@@ -26,6 +26,8 @@ class User(Base):
     phone = Column(String, unique=True, nullable=True, index=True)
     password_hash = Column(String, nullable=False)
     role = Column(Enum("admin", "owner", "driver", name="user_roles"), default="owner")
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
 
     vehicles = relationship("Vehicle", back_populates="owner")
     trips = relationship("Trip", back_populates="driver")
