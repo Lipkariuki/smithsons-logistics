@@ -21,8 +21,10 @@ from routers import (
     metadata,
     reports,
     dhl_reports,
+    fleet,
 )
 from dotenv import load_dotenv
+import asyncio
 import os
 import re
 
@@ -74,9 +76,13 @@ app.include_router(driver_expense.router)
 app.include_router(metadata.router)
 app.include_router(reports.router)
 app.include_router(dhl_reports.router)
+app.include_router(fleet.router)
+
+fleet_scheduler_task = None
 
 @app.on_event("startup")
-def startup():
+async def startup():
+    global fleet_scheduler_task
     Base.metadata.create_all(bind=engine)
     # One-time normalization: convert blank optional fields to NULL
     try:
@@ -125,6 +131,23 @@ def startup():
     except Exception:
         # Avoid blocking app startup if cleanup fails; logs are visible in platform
         pass
+
+    if os.getenv("FLEET_SCHEDULER_ENABLED", "true").lower() in {"1", "true", "yes"}:
+        from services.fleet_notifications import fleet_notification_scheduler
+
+        fleet_scheduler_task = asyncio.create_task(fleet_notification_scheduler())
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global fleet_scheduler_task
+    if fleet_scheduler_task:
+        fleet_scheduler_task.cancel()
+        try:
+            await fleet_scheduler_task
+        except asyncio.CancelledError:
+            pass
+        fleet_scheduler_task = None
 
 # ✅ Mount static files AFTER routers — prevents catch-all from hijacking API
 if os.path.exists("dist"):
