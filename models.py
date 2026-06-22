@@ -46,6 +46,61 @@ class Vehicle(Base):
     trips = relationship("Trip", back_populates="vehicle")
 
 
+class FleetVehicleCompliance(Base):
+    """Fleet-only metadata attached to an existing operational vehicle."""
+
+    __tablename__ = "fleet_vehicle_compliance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), unique=True, nullable=False, index=True)
+    make_model = Column(String, nullable=True)
+    insurance_provider = Column(String, nullable=True)
+    insurance_policy_number = Column(String, nullable=True)
+    insurance_expiry_date = Column(Date, nullable=True, index=True)
+    inspection_expiry_date = Column(Date, nullable=True, index=True)
+    service_interval_km = Column(Integer, nullable=True)
+    current_mileage = Column(Integer, nullable=True)
+    last_service_date = Column(Date, nullable=True)
+    last_service_mileage = Column(Integer, nullable=True)
+    next_service_due_mileage = Column(Integer, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class FleetDriverCompliance(Base):
+    """Fleet-only compliance metadata attached to an existing driver user."""
+
+    __tablename__ = "fleet_driver_compliance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    driver_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    driver_license_number = Column(String, nullable=True)
+    driver_license_expiry_date = Column(Date, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class FleetNotificationHistory(Base):
+    """Immutable audit record and idempotency guard for fleet reminders."""
+
+    __tablename__ = "fleet_notification_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    deduplication_key = Column(String, unique=True, nullable=False, index=True)
+    entity_type = Column(String, nullable=False, index=True)
+    entity_id = Column(Integer, nullable=False, index=True)
+    notification_type = Column(String, nullable=False, index=True)
+    reminder_threshold = Column(String, nullable=False)
+    due_date = Column(Date, nullable=True)
+    due_mileage = Column(Integer, nullable=True)
+    recipient = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="pending", index=True)
+    provider_response = Column(Text, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 # ✅ Order
 class Order(Base):
     __tablename__ = "orders"
