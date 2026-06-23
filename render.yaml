@@ -11,3 +11,7 @@ services:
         value: postgresql://postgres:kRjxXXjYpWJyFPkVpqPIRCSZAJgRPIwG@postgres.railway.internal:5432/railway
       - key: SECRET_KEY
         value: b9AvseoQu0S17sWDZRCa2j22NW-8zObamPnKMARjFkyo423mwow2memRn8945DKJwqgVJaXXrw4jXE7JI8iEfw
+      - key: AFRICASTALKING_USERNAME
+        value: smithsons
+      - key: AFRICASTALKING_API_KEY
+        sync: false

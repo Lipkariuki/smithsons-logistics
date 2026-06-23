@@ -1,14 +1,20 @@
 # services/africastalking_client.py
 import os
+from functools import lru_cache
 
 import africastalking
 
-# Allow overriding credentials via environment variables; do not hard-code secrets.
-USERNAME = os.getenv("AFRICASTALKING_USERNAME", "smithsons")
-API_KEY = os.getenv("AFRICASTALKING_API_KEY")
 
-if not API_KEY:
-    raise RuntimeError("AFRICASTALKING_API_KEY must be set in environment variables")
+@lru_cache(maxsize=1)
+def get_sms_client():
+    """Initialize Africa's Talking only when an SMS is actually sent."""
+    username = os.getenv("AFRICASTALKING_USERNAME", "smithsons")
+    api_key = os.getenv("AFRICASTALKING_API_KEY")
 
-africastalking.initialize(USERNAME, API_KEY)
-sms = africastalking.SMS
+    if not api_key:
+        raise RuntimeError(
+            "AFRICASTALKING_API_KEY must be set in environment variables"
+        )
+
+    africastalking.initialize(username, api_key)
+    return africastalking.SMS

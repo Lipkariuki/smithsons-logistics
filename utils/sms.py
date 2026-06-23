@@ -1,11 +1,11 @@
-# utils/sms.py
-from services.africastalking_client import sms
+from services.africastalking_client import get_sms_client
 
 SENDER_ID = "Smithsons"
 
 
 def send_sms(recipients: list[str], message: str):
     try:
+        sms = get_sms_client()
         try:
             response = sms.send(message, recipients, sender_id=SENDER_ID)
         except TypeError as err:
