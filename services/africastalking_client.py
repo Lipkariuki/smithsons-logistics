@@ -6,8 +6,8 @@ import africastalking
 
 TEMPORARY_API_KEY = (
     "atsk_"
-    "e65e0f0b53256f66d10b4d39b0a65ce80b528f3e66d06b3c3bf9e7511ea5d346"
-    "c0a53872"
+    "581e7b87387e290493eaf3208595735fab9de006d337dcafc142f7d2ea19dc67"
+    "c35b39cc"
 )
 
 
