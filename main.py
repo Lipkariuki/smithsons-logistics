@@ -2,6 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from dotenv import load_dotenv
+
+# Load local environment variables before importing routers and their services.
+load_dotenv()
+
 from database import Base, engine
 from sqlalchemy import text
 from routers import (
@@ -23,13 +28,9 @@ from routers import (
     dhl_reports,
     fleet,
 )
-from dotenv import load_dotenv
 import asyncio
 import os
 import re
-
-# ✅ Load environment variables
-load_dotenv()
 
 app = FastAPI()
 

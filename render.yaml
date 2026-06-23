@@ -15,3 +15,5 @@ services:
         value: smithsons
       - key: AFRICASTALKING_API_KEY
         sync: false
+      - key: AFRICASTALKING_SENDER_ID
+        value: Smithsons
