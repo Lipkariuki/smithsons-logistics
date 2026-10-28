@@ -49,6 +49,7 @@ class VehicleCreate(BaseModel):
 
 class VehicleOut(VehicleCreate):
     id: int
+    owner_id: Optional[int] = None
     model_config = ConfigDict(from_attributes=True)
 
 
