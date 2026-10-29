@@ -52,7 +52,8 @@ def _context(conn,batch):
 def validate_truck(conn,batch,row,context=None):
     expected, rebuilt, inspected, source = context or _context(conn,batch)
     date_codes={'source_dates_unreviewed','missing_source_date','invalid_source_date','out_of_period_date',
-                'invalid_source_identity','invalid_source_amount','source_gross_inconsistent','source_manifest_mismatch'}
+                'invalid_source_identity','invalid_source_amount','source_gross_inconsistent','source_manifest_mismatch',
+                'duplicate_source_row','unsupported_source_charge'}
     blockers=[i for i in expected['issues'] if i.get('blocking',True) and i['code'] not in date_codes]
     # Include all live selected-month records, including trucks outside the roster.
     from services.monthly_files import resolve_review

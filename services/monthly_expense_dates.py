@@ -89,6 +89,53 @@ def retain_source(content, month):
     return review
 
 
+def charge_issues(content, month, target_plate=None):
+    """Flag ambiguous/repeated transport charges; never silently deduplicate.
+
+    Keep these diagnostics separate from the immutable v1 review metadata so
+    previously retained sources remain readable without rewriting their audit.
+    """
+    wb = load_workbook(io.BytesIO(content), data_only=True)
+    try:
+        ws = wb.active
+        for number in range(1, min(ws.max_row, 30) + 1):
+            names = {normalize_header(str(c.value)): c.column for c in ws[number] if c.value is not None}
+            if {'date', 'truck', 'ref no', 'cost', 'amount'}.issubset(names):
+                break
+        else:
+            return []  # inspect_source reports malformed headers first.
+        found, result = {}, []
+        for row in range(number + 1, ws.max_row + 1):
+            value = ws.cell(row, names['date']).value
+            day = value.date() if isinstance(value, datetime) else value if isinstance(value, date) else None
+            if isinstance(value, str):
+                try: day = date.fromisoformat(value.strip())
+                except ValueError: pass
+            if day is None or (day.year, day.month) != (month.year, month.month):
+                continue  # Strict date validation handles these separately.
+            plate = _plate(ws.cell(row, names['truck']).value)
+            if target_plate and plate and plate != target_plate:
+                continue
+            label = str(ws.cell(row, names['cost']).value or '').strip().casefold()
+            if label == 'admin':
+                continue
+            if label not in {'dist', 'offloading'}:
+                result.append({'code': 'unsupported_source_charge', 'cell': None, 'blocking': True,
+                    'message': f'Excel row {row}: COST must be DIST, Offloading or Admin. Review the source charge type.'})
+                continue
+            try: amount = money(ws.cell(row, names['amount']).value)
+            except ValueError: continue  # inspect_source already reports it.
+            key = (day, plate, _ref(ws.cell(row, names['ref no']).value), label, amount)
+            if key in found:
+                result.append({'code': 'duplicate_source_row', 'cell': None, 'blocking': True,
+                    'message': f'Excel rows {found[key]} and {row}: repeated {label} charge for {plate}, ref {key[2]}. Check the original; no duplicate has been removed automatically.'})
+            else:
+                found[key] = row
+        return result
+    finally:
+        wb.close()
+
+
 def validate_source(review, dispositions, source, month, *, target_plate=None, _inspected=None):
     """Reparse retained bytes every build/confirmation; flags cannot supply results."""
     def issue(code, message): return {'code': code, 'message': message, 'cell': None, 'blocking': True}
@@ -104,7 +151,7 @@ def validate_source(review, dispositions, source, month, *, target_plate=None, _
     known = {str(r['source_row']): r for r in actual['date_issues']}
     if set(dispositions) - set(known):
         raise ValueError('Date decisions must identify affected rows in this exact raw workbook')
-    result = []
+    result = charge_issues(content, month, target_plate)
     for key, row in known.items():
         decision = dispositions.get(key)
         # Only out-of-period dates can be excluded through this narrow workflow.

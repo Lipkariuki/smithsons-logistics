@@ -58,6 +58,25 @@ class StatementTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 create_document(conn, batch['rows'][0]['id'], 7)
 
+    def test_distribution_offloading_lines_use_frozen_source_not_live_revenue(self):
+        with self.engine.begin() as conn:
+            batch = self.confirmed(conn)
+            conn.execute(text('UPDATE dhl_orders SET distribution_cost=999999, offloading_cost=999999, total_revenue=1999998'))
+            doc = create_document(conn, batch['rows'][0]['id'], 7)
+            content = '\n'.join(p.extract_text() for p in PdfReader(io.BytesIO(bytes(doc['pdf_content']))).pages)
+            self.assertIn('Distribution Revenue', content)
+            self.assertIn('Offloading Revenue', content)
+            for amount in ['900.00', '100.00', '1,000.00', '200.00', '800.00', '56.00', '744.00']:
+                self.assertIn('KES ' + amount, content)
+            self.assertNotIn('999,999', content)
+            self.assertEqual(doc['renderer_version'], 'smithsons-monthly-statement-v3-revenue-breakdown')
+
+    def test_inconsistent_frozen_revenue_breakdown_cannot_render(self):
+        from services.monthly_statement_documents import transport_components
+        with self.assertRaises(ValueError):
+            transport_components({'gross': Decimal('1000.00'), 'dhl_source_snapshot': [
+                {'distribution_cost': '800.00', 'offloading_cost': '100.00'}]})
+
     def test_database_update_delete_and_draft_insert_blocked(self):
         with self.engine.begin() as conn:
             batch = self.confirmed(conn)

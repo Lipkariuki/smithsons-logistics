@@ -14,7 +14,7 @@ from sqlalchemy import (MetaData, Table, Column, BigInteger, LargeBinary, String
 from services.monthly_expense_models import imports, rows
 from utils.payslip_branding import payslip_text
 
-RENDERER = 'smithsons-monthly-statement-v2-itemized'
+RENDERER = 'smithsons-monthly-statement-v3-revenue-breakdown'
 metadata = MetaData()  # Deliberately excluded from application create_all.
 documents = Table('monthly_statement_documents', metadata,
     Column('id', BigInteger, primary_key=True),
@@ -49,8 +49,19 @@ def validate_snapshot(row):
         raise ValueError('Unresolved financial validation')
 
 
+def transport_components(row):
+    """Use frozen confirmed source rows, never live trips/manual payslips."""
+    from services.monthly_expense_parser import money
+    distribution = sum((money(r['distribution_cost']) for r in row['dhl_source_snapshot']), Decimal('0.00'))
+    offloading = sum((money(r['offloading_cost']) for r in row['dhl_source_snapshot']), Decimal('0.00'))
+    if distribution + offloading != row['gross']:
+        raise ValueError('Confirmed transport breakdown does not equal gross; no statement created')
+    return distribution, offloading
+
+
 def render_statement(row, batch):
     validate_snapshot(row)
+    distribution, offloading = transport_components(row)
     pdf = FPDF()
     fonts=Path(__file__).resolve().parents[1]/'assets/fonts'
     pdf.add_font('Statement','',str(fonts/'DejaVuSans.ttf'))
@@ -106,7 +117,9 @@ def render_statement(row, batch):
             pdf.cell(0,7,f'KES {amount:,.2f}' if index==0 else '',border=border,align='R')
             pdf.set_xy(x,y+7)
 
-    line('Gross Transport Revenue', row['gross'])
+    line('Distribution Revenue', distribution)
+    line('Offloading Revenue', offloading)
+    line('Gross Transport Revenue', row['gross'], True)
     itemized=Decimal('0.00')
     columns={h['category']:h['column'] for h in batch.get('header_mappings',[]) if h['classification']=='expense'}
     for category,item in sorted(row['deductions'].items(),key=lambda entry:columns.get(entry[0],10000)):

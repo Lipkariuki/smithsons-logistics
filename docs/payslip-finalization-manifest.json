@@ -1,0 +1,36 @@
+{
+  "scope": "Approved existing PDF revenue breakdown, source charge validation and saved-workbook guidance; no production execution",
+  "production_push_deploy_approved": false,
+  "backend": {
+    "base_commit": "b8a90229390a48cb4afe065d82d3906db9ea99c5",
+    "files": [
+      "services/monthly_expense_dates.py",
+      "services/monthly_statement_documents.py",
+      "services/truck_confirmations.py",
+      "tests/test_monthly_statement_documents.py",
+      "tests/test_revenue_source_integrity.py",
+      "docs/payslip-finalization-release.md",
+      "docs/payslip-finalization-manifest.json"
+    ],
+    "sha256": {
+      "services/monthly_expense_dates.py": "af1bc4f7e6d24b8abb81ffa705199f60acfdb4b68601c764e9b58d14af41c44a",
+      "services/monthly_statement_documents.py": "33673e5a70342b434e49ba0f967d3970a3ab6da6d92a88bc6b69bc01d52e6d9b",
+      "services/truck_confirmations.py": "b2348a845a6ac45f6caba6e9d30e7013261fd8db7851fe1ac9ae5ce80be51d3c",
+      "tests/test_monthly_statement_documents.py": "d3b0eea6caddaa7dc108bb8618c5758d03d5e22328975aba0b5f24d04fb0c586",
+      "tests/test_revenue_source_integrity.py": "d4bb198997504f584ca49e75704367f9a894d8482950361338c4e92aa1320f9e",
+      "docs/payslip-finalization-release.md": "eb9ef1b67acc22212f64c66ee2cac807239be2aadc2e2f9e7aad23ad4467c320"
+    }
+  },
+  "frontend": {
+    "base_commit": "7e0c3949e969d670eee4c4a73161d19843893d79",
+    "files": [
+      "src/pages/reports/SavedMonthlyFiles.jsx",
+      "tests/kavSavedPayslip.real.browser.test.mjs"
+    ],
+    "sha256": {
+      "src/pages/reports/SavedMonthlyFiles.jsx": "6b951ca76fc8c869a625eeacd7d20fb0d4dc01207a63a635ab085815d57485d7",
+      "tests/kavSavedPayslip.real.browser.test.mjs": "436987e7cc4d557ae554e77745405fd4f1cb0c4c7fd961461f1c39ae3b75f7f6"
+    }
+  },
+  "manifest_hash_note": "Self-hash omitted; commit identifies exact manifest bytes."
+}
