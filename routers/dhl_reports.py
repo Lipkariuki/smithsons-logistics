@@ -6,8 +6,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import OperationalError
 from fpdf import FPDF
 from utils.payslip_branding import payslip_text
 
@@ -34,7 +35,7 @@ from schemas import (
     DHLPayslipOut,
     DHLPayslipUpdate,
 )
-from services.dhl_import import import_dhl_report
+from services.dhl_import import import_dhl_report, parse_dhl_excel
 
 router = APIRouter(prefix="/dhl-reports", tags=["DHL Reports"])
 
@@ -223,7 +224,28 @@ def upload_dhl_report(
         raise HTTPException(status_code=400, detail="Empty file uploaded")
 
     try:
+        if replace:
+            # The legacy importer deletes same-period manual payslips. Protect
+            # that history before invoking it, including concurrent creations.
+            _, period_start, period_end = parse_dhl_excel(content)
+            db.execute(text("SET LOCAL lock_timeout = '5s'"))
+            db.execute(text("LOCK TABLE dhl_payslips IN SHARE ROW EXCLUSIVE MODE"))
+            existing = db.query(DHLPayslip.id).filter(
+                DHLPayslip.period_start == period_start,
+                DHLPayslip.period_end == period_end,
+            ).first()
+            if existing is not None:
+                raise HTTPException(status_code=409, detail=(
+                    "This period has existing manual payslips. Replacement was blocked "
+                    "to preserve them; no DHL records were changed. Review the source "
+                    "and confirmed monthly report workflow before proceeding."
+                ))
         result = import_dhl_report(db, content, replace=replace)
+    except OperationalError as exc:
+        if getattr(exc.orig, "sqlstate", None) == "55P03":
+            db.rollback()
+            raise HTTPException(status_code=409, detail="DHL upload is busy; retry after the current financial operation finishes") from None
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
