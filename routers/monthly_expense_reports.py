@@ -37,6 +37,7 @@ class DateDisposition(BaseModel):
 
 class ImportOptions(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
+    raw_workbook_id: int | None = Field(None, gt=0)
     approved_mappings: dict[str, StrictStr | None] = Field(default_factory=dict)
     corrections: dict[str, StrictStr] = Field(default_factory=dict)
     verified_no_activity: dict[str, StrictStr] = Field(default_factory=dict)
@@ -118,6 +119,11 @@ def _view(conn, batch, **filters):
     view = _run(report_view, batch, versions, **filters)
     from services.truck_confirmations import presentation
     from services.monthly_expense_reports import decimal_json
+    source_id=(batch.get('decisions',{}).get('historical_review') or {}).get('archive_id')
+    if source_id:
+        from services.monthly_files import workbooks, metadata_view
+        info=_run(lambda:conn.execute(select(*[c for c in workbooks.c if c.name!='content']).where(workbooks.c.id==source_id)).mappings().one())
+        view['raw_source_file']=decimal_json(metadata_view(info))
     states=_run(presentation,conn,batch)
     if states is not None:
         for row in view['rows']:
@@ -133,6 +139,27 @@ def _view(conn, batch, **filters):
     return view
 
 
+
+def _saved_source(conn, config, month, actor, raw_file=None, save=False, fallback=None):
+    from services import monthly_files as files
+    identifier=config.pop('raw_workbook_id',None)
+    if raw_file is not None:
+        content=_upload(raw_file)
+        if save and files.available(conn):
+            record=_run(files.register,conn,content,month,raw_file.filename,actor.id,identifier,config.get('reason',''))
+            return files.reference(record)
+        return _run(review_historical_adjustments,content,month)
+    if identifier is not None:
+        if not files.available(conn):raise HTTPException(503,'Saved file storage requires migration 005')
+        record=_run(files.get,conn,identifier)
+        if record['reporting_month']!=month:raise HTTPException(422,'Saved raw workbook belongs to a different month')
+        return files.reference(record)
+    if fallback is not None:return fallback
+    if files.available(conn):
+        identifier=conn.execute(select(files.workbooks.c.id).where(files.workbooks.c.reporting_month==month).order_by(files.workbooks.c.version.desc()).limit(1)).scalar_one_or_none()
+        if identifier is not None:return files.reference(files.get(conn,identifier))
+    return None
+
 def create_router(connection_dependency, admin_dependency):
     def no_cache(response: Response):
         response.headers['Cache-Control'] = 'no-store'
@@ -146,8 +173,7 @@ def create_router(connection_dependency, admin_dependency):
                 actor=Depends(admin_dependency), conn=Depends(connection_dependency)):
         content = _upload(file)
         config = _options(options)
-        if raw_trips_file is not None:
-            config['historical_review'] = _run(review_historical_adjustments, _upload(raw_trips_file), month)
+        config['historical_review'] = _saved_source(conn,config,month,actor,raw_trips_file)
         return _view(conn, _run(preview_import, conn, content, month, actor.id, **config))
 
     @router.post('/expense-imports', status_code=201)
@@ -156,8 +182,7 @@ def create_router(connection_dependency, admin_dependency):
              actor=Depends(admin_dependency), conn=Depends(connection_dependency)):
         content = _upload(file)
         config = _options(options)
-        if raw_trips_file is not None:
-            config['historical_review'] = _run(review_historical_adjustments, _upload(raw_trips_file), month)
+        config['historical_review'] = _saved_source(conn,config,month,actor,raw_trips_file,save=True)
         batch = _run(create_draft, conn, content, month, file.filename, actor.id, **config)
         return _view(conn, batch)
 
@@ -173,12 +198,11 @@ def create_router(connection_dependency, admin_dependency):
         if config['previous_version_id'] not in (None, import_id):
             raise HTTPException(422, 'A revision must refer to the selected saved version')
         config['previous_version_id'] = import_id
-        config['historical_review'] = original['decisions'].get('historical_review')
-        if raw_trips_file is not None:
-            config['historical_review'] = _run(review_historical_adjustments, _upload(raw_trips_file), original['reporting_month'])
-            if config['historical_review']['sha256'] != (original['decisions'].get('historical_review') or {}).get('sha256'):
-                if config['date_dispositions']:
-                    raise HTTPException(422, 'Review the new raw workbook before applying date decisions')
+        config['historical_review'] = _saved_source(conn,config,original['reporting_month'],actor,raw_trips_file,
+            save=mode=='save',fallback=original['decisions'].get('historical_review'))
+        if config['historical_review'] and config['historical_review']['sha256'] != (original['decisions'].get('historical_review') or {}).get('sha256'):
+            if config['date_dispositions']:
+                raise HTTPException(422, 'Save the new source as a draft first, then review its historical dates. Earlier date decisions cannot be carried to a different workbook.')
         _, live_fingerprint = _run(_sources, conn, original['reporting_month'])
         if live_fingerprint != original['dhl_source_fingerprint']:
             # Old attestations are not new evidence after a DHL replacement.

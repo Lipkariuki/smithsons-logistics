@@ -1,0 +1,62 @@
+{
+  "purpose": "Saved monthly originals and strict attach-only DHL revenue evidence; local commits only",
+  "production_execution_approved": false,
+  "backend": {
+    "base_commit": "4c6ba5f383805f77ae6331eca15716b4190bfca0",
+    "branch": "main",
+    "files": [
+      "main.py",
+      "routers/dhl_reports.py",
+      "routers/monthly_expense_reports.py",
+      "routers/monthly_files.py",
+      "services/monthly_files.py",
+      "services/monthly_expense_persistence.py",
+      "services/monthly_expense_reports.py",
+      "services/truck_confirmations.py",
+      "migrations/005_saved_dhl_workbooks.sql",
+      "scripts/migrate_saved_monthly_files.py",
+      "tests/test_saved_monthly_files.py",
+      "docs/saved-monthly-files.md",
+      "docs/february-evidence-verification.md",
+      "docs/saved-files-release-readiness.md",
+      "docs/saved-files-release-manifest.json"
+    ],
+    "sha256": {
+      "main.py": "197188df65f2d58c07e35436360ff370202cae30c60671479e53cc6128d775f6",
+      "routers/dhl_reports.py": "c355901a55d8b8d1dcc9f887cc29b756f087aac72aa8970f6f288e3dde224a2e",
+      "routers/monthly_expense_reports.py": "c5c242d7632e8b716c15373373af35d40c7ac9ab73d2e9c7584e67df7fd5c05d",
+      "routers/monthly_files.py": "0e172415e1c76c21f3fb59cdee83a98e046d7edf30071fb2c7685f4de57c8772",
+      "services/monthly_files.py": "55ea21997b0117d2773913c8dcd60900335a0dc36ff50e060d91476eb20b1262",
+      "services/monthly_expense_persistence.py": "5200b6ec4860d717b07560676840a5acdd5c3b24cb51c4990b5ed71923dc6eb7",
+      "services/monthly_expense_reports.py": "08bc31015a208bb73968cf3a3e6330e527e23a3e2cb074109d4d9cab81910656",
+      "services/truck_confirmations.py": "42eda0e9bfd47e49c69f85316970ef5aeb025003addb7d26db9b97dc33e2cae1",
+      "migrations/005_saved_dhl_workbooks.sql": "e0f4e4f2fd20294d9e8180f9a3c5d4485ea5d563c310c2736dc2ece2d9617348",
+      "scripts/migrate_saved_monthly_files.py": "34449db7b8ce71191c02a6865ec391c2d4e5be37d880720f61824c5a419f0352",
+      "tests/test_saved_monthly_files.py": "e8f432065458777ac0feed8db8580a4c197086a09a01f94a503733bb02b4f6ea",
+      "docs/saved-monthly-files.md": "be728d1658f881c348126b1a163c37963c19cf2681f2f0572162b7619a6d3e4c",
+      "docs/february-evidence-verification.md": "a2de681daff1b5b297a97c4801d8530928446dd0507f2a9f20389f6c5d22c18d",
+      "docs/saved-files-release-readiness.md": "45cbd7a8de807ffdd4b801fe44cc622b838bff5296a0523a45138b14cd904ff2"
+    }
+  },
+  "frontend": {
+    "base_commit": "1048c8c30b9dba2d958a562a1ef444dc60bd03eb",
+    "branch": "main",
+    "files": [
+      "src/pages/reports/DhlReportsPage.jsx",
+      "src/pages/reports/MonthlyExpenseReports.jsx",
+      "src/pages/reports/monthlyExpenseUi.js",
+      "src/pages/reports/SavedMonthlyFiles.jsx",
+      "tests/monthlyExpenses.browser.test.mjs",
+      "tests/savedMonthlyFiles.real.browser.test.mjs"
+    ],
+    "sha256": {
+      "src/pages/reports/DhlReportsPage.jsx": "ef3c3ec7351630e05f7e148b263a6ac2a821c91b50beba01744384bd0fdbcff9",
+      "src/pages/reports/MonthlyExpenseReports.jsx": "c9696c0268bb590be4e70848de101fe6d5a8caa2b4c2b70cc721e82c9c7acead",
+      "src/pages/reports/monthlyExpenseUi.js": "0aa1c4cfdbaf19a36928c18bb803767055a72ad410aecadf77a1e6740b064ff2",
+      "src/pages/reports/SavedMonthlyFiles.jsx": "c061d5cea03ac65a9b3b600d7f53411aacd0ffc3c3e4e280396a8f8c566141d3",
+      "tests/monthlyExpenses.browser.test.mjs": "0d0c92d23740603a1fe9fb152a5f85c3028a18f21dfc528b17a95206b1cb4019",
+      "tests/savedMonthlyFiles.real.browser.test.mjs": "9f440f9169ead25b93bd73992ce663261fd9c84f928cbf795d1a17b901a0899b"
+    }
+  },
+  "self_hash_note": "Manifest lists itself but excludes its own recursive hash; commit identifies its exact bytes."
+}

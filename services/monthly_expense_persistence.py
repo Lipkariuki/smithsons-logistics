@@ -83,6 +83,11 @@ def _build(conn, content, month, decisions, actor, audit_time):
     preview = parse_expenses(content, month, sheet_name=decisions['sheet_name'],
                              approved_mappings=decisions['approved_mappings'], corrections=decisions['corrections'])
     source, fingerprint = _sources(conn, month)
+    from services.monthly_files import resolve_review
+    source_review = resolve_review(conn, decisions.get('historical_review'), month)
+    # Archived evidence must support this truck before labelling its revenue
+    # verified. Other trucks' unresolved rows still do not block this truck.
+    archived_review = bool((decisions.get('historical_review') or {}).get('archive_id'))
     # Read-only legacy identity lookup. No ORM relationships or payout services.
     vehicles = list(conn.execute(text('''SELECT v.id, v.plate_number, v.owner_id, v.size,
           u.name AS owner_name FROM vehicles v LEFT JOIN users u ON u.id = v.owner_id''')).mappings())
@@ -103,6 +108,8 @@ def _build(conn, content, month, decisions, actor, audit_time):
         records = [item for item in source if _plate(item['truck_plate']) == row.plate]
         reason = proofs.get(row.plate, '')
         verification = decisions['source_verification']
+        if archived_review and validate_source(source_review, decisions.get('date_dispositions', {}), source, month, target_plate=row.plate):
+            verification = ''
         if reason and records:
             issues.append({'code': 'no_activity_conflict', 'message': 'DHL records exist for a no-activity claim',
                            'cell': None, 'blocking': True})
@@ -156,7 +163,7 @@ def _build(conn, content, month, decisions, actor, audit_time):
                              deductions=deductions, cell_audit=audit, dhl_source_snapshot=records,
                              revenue_status=status.value, revenue_evidence=evidence, issues=issues, **financial))
     batch_issues = [asdict(i) for i in preview.issues]
-    batch_issues += validate_source(decisions.get('historical_review'), decisions.get('date_dispositions', {}), source, month)
+    batch_issues += validate_source(source_review, decisions.get('date_dispositions', {}), source, month)
     if not decisions['source_verification']:
         batch_issues.append({'code': 'source_unverified', 'message': 'Month completeness verification required',
                              'cell': None, 'blocking': True})

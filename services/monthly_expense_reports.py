@@ -58,7 +58,7 @@ def report_view(batch, versions=(), *, owner_id=None, vehicle_id=None):
                   and not any(i['blocking'] for r in batch['rows'] for i in r['issues']),
                   comparison_policy={'difference': 'calculated_minus_manual', 'rounding_sized_tolerance': '0.01',
                                      'version': 'manual-reference-v1'})
-    if batch['status'] == 'draft' and not (batch['decisions'].get('historical_review') or {}).get('source_content_base64'):
+    if batch['status'] == 'draft' and not any((batch['decisions'].get('historical_review') or {}).get(k) for k in ('source_content_base64', 'archive_id')):
         detail['ready'] = False
         detail['issues'] = list(detail['issues'])
         if not any(i['code'] == 'source_dates_unreviewed' for i in detail['issues']):

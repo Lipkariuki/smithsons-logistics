@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import and_, func, or_, text
 from sqlalchemy.orm import Session, joinedload
@@ -216,18 +216,31 @@ def _generate_payslip_pdf(payslip: DHLPayslip, vehicle: Vehicle) -> bytes:
 def upload_dhl_report(
     file: UploadFile = File(...),
     replace: bool = Query(True),
+    reporting_month: Optional[date] = Query(None),
+    source_previous_id: Optional[int] = Query(None, gt=0),
+    source_reason: str = Form('', max_length=2000),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    content = file.file.read()
+    content = file.file.read(20_000_001)
+    if len(content)>20_000_000:
+        raise HTTPException(413, 'Workbook exceeds 20 MB')
     if not content:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
 
+    retained_id = None
     try:
+        _, period_start, period_end = parse_dhl_excel(content)
+        if reporting_month is not None and reporting_month != period_start:
+            raise HTTPException(422, 'The workbook dates do not match the selected reporting month')
+        from services import monthly_files as saved_files
+        archive_enabled = saved_files.available(db.connection())
+        if archive_enabled:
+            from services.monthly_expense_persistence import _lock
+            _lock(db.connection(), period_start)
         if replace:
             # The legacy importer deletes same-period manual payslips. Protect
             # that history before invoking it, including concurrent creations.
-            _, period_start, period_end = parse_dhl_excel(content)
             db.execute(text("SET LOCAL lock_timeout = '5s'"))
             db.execute(text("LOCK TABLE dhl_payslips IN SHARE ROW EXCLUSIVE MODE"))
             existing = db.query(DHLPayslip.id).filter(
@@ -240,6 +253,14 @@ def upload_dhl_report(
                     "to preserve them; no DHL records were changed. Review the source "
                     "and confirmed monthly report workflow before proceeding."
                 ))
+        if archive_enabled and (file.filename or '').lower().endswith('.xlsx'):
+            from services.monthly_expense_persistence import VersionConflict
+            try:
+                archive = saved_files.register(db.connection(),content,period_start,file.filename,current_user.id,
+                    source_previous_id,source_reason)
+            except VersionConflict as exc:
+                raise HTTPException(409,str(exc)) from None
+            retained_id = archive['id']
         result = import_dhl_report(db, content, replace=replace)
     except OperationalError as exc:
         if getattr(exc.orig, "sqlstate", None) == "55P03":
@@ -254,6 +275,8 @@ def upload_dhl_report(
         "period_end": result.period_end,
         "inserted": result.inserted,
         "unmatched_vehicles": result.unmatched,
+        "retained_workbook_id": retained_id,
+        "file_retained": retained_id is not None,
     }
 
 

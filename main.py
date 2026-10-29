@@ -84,6 +84,10 @@ from routers import monthly_statement_documents
 app.include_router(monthly_statement_documents.create_router(
     monthly_expense_reports.get_connection, auth.require_role('admin')
 ))
+from routers import monthly_files
+app.include_router(monthly_files.create_router(
+    monthly_expense_reports.get_connection, auth.require_role('admin')
+))
 app.include_router(fleet.router)
 
 fleet_scheduler_task = None

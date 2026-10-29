@@ -42,7 +42,8 @@ def _context(conn,batch):
         # records change. Mapping/assumption integrity must nevertheless match.
         if any(batch[k]!=expected[k] for k in ('header_mappings','assumptions')):
             raise ValidationBlocked('Stored workbook mapping or assumptions changed')
-    review=batch['decisions'].get('historical_review')
+    from services.monthly_files import resolve_review
+    review=resolve_review(conn,batch['decisions'].get('historical_review'),batch['reporting_month'])
     inspected=inspect_source(base64.b64decode(review['source_content_base64'],validate=True),batch['reporting_month']) if review and review.get('source_content_base64') else None
     source,_=_sources(conn,batch['reporting_month'])
     return expected, {r['source_row']:r for r in expected_rows}, inspected, source
@@ -54,7 +55,8 @@ def validate_truck(conn,batch,row,context=None):
                 'invalid_source_identity','invalid_source_amount','source_gross_inconsistent','source_manifest_mismatch'}
     blockers=[i for i in expected['issues'] if i.get('blocking',True) and i['code'] not in date_codes]
     # Include all live selected-month records, including trucks outside the roster.
-    blockers+=validate_source(batch['decisions'].get('historical_review'),batch['decisions'].get('date_dispositions',{}),
+    from services.monthly_files import resolve_review
+    blockers+=validate_source(resolve_review(conn,batch['decisions'].get('historical_review'),batch['reporting_month']),batch['decisions'].get('date_dispositions',{}),
         source,batch['reporting_month'],target_plate=row['normalized_plate'],_inspected=inspected)
     if blockers:
         raise ValidationBlocked('; '.join(i['message'] for i in blockers))
