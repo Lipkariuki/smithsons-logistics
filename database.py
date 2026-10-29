@@ -1,11 +1,11 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from settings import database_url
 
-# Railway PostgreSQL connection
-SQLALCHEMY_DATABASE_URL = "postgresql+psycopg://postgres:kRjxXXjYpWJyFPkVpqPIRCSZAJgRPIwG@maglev.proxy.rlwy.net:11266/railway"
+SQLALCHEMY_DATABASE_URL = database_url()
 
-# Create engine and session
-engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=True)
+# Creating the engine does not connect. Never log SQL authentication parameters.
+engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=False, hide_parameters=True, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 

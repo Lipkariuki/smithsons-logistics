@@ -1,3 +1,4 @@
+from routers.auth import require_role
 # Updated FastAPI Admin Route to Use Trip.revenue Instead of Order.total_amount
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -7,7 +8,7 @@ from models import Order, Trip, User, Expense, Commission, Vehicle, FuelExpense
 from schemas import AdminOrderOut
 from typing import Optional, List
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
+router = APIRouter(prefix="/admin", tags=["Admin"], dependencies=[Depends(require_role("admin"))])
 
 @router.get("/orders", response_model=List[AdminOrderOut])
 def get_admin_orders(

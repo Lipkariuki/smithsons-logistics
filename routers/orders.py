@@ -1,3 +1,4 @@
+from routers.auth import require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -14,7 +15,7 @@ from schemas import (
     OrderUpdate,
 )
 
-router = APIRouter(prefix="/orders", tags=["Orders"])
+router = APIRouter(prefix="/orders", tags=["Orders"], dependencies=[Depends(require_role("admin"))])
 
 
 def _normalize_optional_string(value: str | None):
@@ -267,8 +268,8 @@ def get_orders(month: int = Query(None, ge=1, le=12), db: Session = Depends(get_
             id=order.id,
             order_number=order.order_number,
             invoice_number=order.invoice_number,
-            purchase_order_number=order.purchase_order_number,
-            dispatch_note_number=order.dispatch_note_number,
+            purchase_order_number=order.purchase_order_number or "",
+            dispatch_note_number=order.dispatch_note_number or "",
             date=order.date,
             product_type=order.product_type,
             product_description=order.product_description,

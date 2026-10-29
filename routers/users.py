@@ -39,7 +39,7 @@ def get_my_user(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@router.get("/", response_model=List[UserOut])
+@router.get("/", response_model=List[UserOut], dependencies=[Depends(require_role("admin"))])
 def list_users(
     role: str = None,
     include_inactive: bool = Query(False),

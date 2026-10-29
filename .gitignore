@@ -24,3 +24,6 @@ venv/
 
 # DB
 *.sqlite3
+
+# Safe template contains names only, never credentials
+!.env.example

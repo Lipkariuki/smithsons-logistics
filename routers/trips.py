@@ -16,7 +16,7 @@ from typing import List
 from utils.rate_lookup import get_rate
 from routers.auth import require_role
 
-router = APIRouter(prefix="/trips", tags=["Trips"])
+router = APIRouter(prefix="/trips", tags=["Trips"], dependencies=[Depends(require_role("admin"))])
 
 @router.post("/", response_model=TripOut)
 def create_trip(trip: TripCreate, db: Session = Depends(get_db)):

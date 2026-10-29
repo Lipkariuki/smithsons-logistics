@@ -1,6 +1,9 @@
 import os
+import logging
 
 from services.africastalking_client import get_sms_client
+
+logger = logging.getLogger(__name__)
 
 SENDER_ID = os.getenv("AFRICASTALKING_SENDER_ID", "Smithsons")
 
@@ -53,8 +56,8 @@ def send_sms(recipients: list[str], message: str):
                 )
             else:
                 raise
-        print("SMS sent:", response)
+        logger.info("SMS provider request completed")
         return response
-    except Exception as e:
-        print("SMS Error:", e)
-        return {"error": str(e)}
+    except Exception:
+        logger.warning("SMS provider request failed; verify configuration and provider status")
+        return {"error": "SMS delivery failed; verify configuration and provider status"}

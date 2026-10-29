@@ -2,10 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from dotenv import load_dotenv
-
-# Load local environment variables before importing routers and their services.
-load_dotenv()
+# Load validated platform/local settings before importing database and services.
+import settings
 
 from database import Base, engine
 from sqlalchemy import text
@@ -27,6 +25,7 @@ from routers import (
     reports,
     dhl_reports,
     fleet,
+    monthly_expense_reports,
 )
 import asyncio
 import os
@@ -58,6 +57,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 # ✅ Include all routers BEFORE static files
@@ -77,6 +77,9 @@ app.include_router(driver_expense.router)
 app.include_router(metadata.router)
 app.include_router(reports.router)
 app.include_router(dhl_reports.router)
+app.include_router(monthly_expense_reports.create_router(
+    monthly_expense_reports.get_connection, auth.require_role('admin')
+))
 app.include_router(fleet.router)
 
 fleet_scheduler_task = None

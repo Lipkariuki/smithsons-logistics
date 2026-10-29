@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 from fpdf import FPDF
+from utils.payslip_branding import payslip_text
 
 from database import get_db
 from models import (
@@ -141,6 +142,9 @@ def _generate_payslip_pdf(payslip: DHLPayslip, vehicle: Vehicle) -> bytes:
     generated_on = datetime.utcnow().strftime("%Y-%m-%d")
 
     pdf = FPDF()
+    pdf.set_title("Monthly Transport Statement")
+    pdf.set_author("SMITHSONS LOGISTICS")
+    pdf.set_creator("SMITHSONS LOGISTICS")
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
 
@@ -153,11 +157,11 @@ def _generate_payslip_pdf(payslip: DHLPayslip, vehicle: Vehicle) -> bytes:
         pass
 
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 8, "Smithsons Logistics", ln=True, align="C")
+    pdf.cell(0, 8, "SMITHSONS LOGISTICS", ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(0, 6, "Powering Every Trip. Empowering Every Partner.", ln=True, align="C")
     pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, _latin1("DHL Partner Payslip"), ln=True, align="C")
+    pdf.cell(0, 6, _latin1("Monthly Transport Statement"), ln=True, align="C")
     pdf.set_draw_color(60, 60, 60)
     pdf.set_line_width(0.5)
     pdf.line(15, 34, 195, 34)
@@ -176,17 +180,17 @@ def _generate_payslip_pdf(payslip: DHLPayslip, vehicle: Vehicle) -> bytes:
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(0, 7, "Earnings", ln=True)
     pdf.set_font("Helvetica", "", 11)
-    pdf.cell(140, 7, "DHL Revenue", 1)
+    pdf.cell(140, 7, "Gross Transport Revenue", 1)
     pdf.cell(0, 7, _format_currency(payslip.total_revenue), 1, ln=True, align="R")
 
     pdf.ln(4)
     pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(0, 7, "Deductions", ln=True)
+    pdf.cell(0, 7, "Operating Expenses and Commission", ln=True)
     pdf.set_font("Helvetica", "", 11)
     pdf.cell(140, 7, f"Commission ({payslip.commission_rate * 100:.2f}%)", 1)
     pdf.cell(0, 7, _format_currency(payslip.commission_amount), 1, ln=True, align="R")
     for item in payslip.expenses:
-        pdf.cell(140, 7, _latin1(item.name), 1)
+        pdf.cell(140, 7, _latin1(payslip_text(item.name)), 1)
         pdf.cell(0, 7, _format_currency(item.amount), 1, ln=True, align="R")
 
     pdf.ln(4)
@@ -763,7 +767,7 @@ def download_payslip_pdf(
     else:
         pdf_bytes = _generate_payslip_pdf(payslip, payslip.vehicle)
     pdf_bytes = bytes(pdf_bytes)
-    filename = f"dhl_payslip_{payslip.vehicle.plate_number}_{payslip.period_start}.pdf"
+    filename = f"smithsons_payslip_{payslip.vehicle.plate_number}_{payslip.period_start}.pdf"
     return Response(
         pdf_bytes,
         media_type="application/pdf",

@@ -1,0 +1,4 @@
+-r requirements.txt
+# PDF text/metadata verification only; not needed by production endpoints.
+pypdf
+pdfplumber

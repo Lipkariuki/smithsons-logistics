@@ -1,3 +1,4 @@
+from routers.auth import require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -7,7 +8,7 @@ from models import Expense, Trip, Order, Vehicle, FuelExpense
 from schemas import ExpenseCreate, ExpenseOut, ExpenseListResponse, ExpenseListItem
 from datetime import date, datetime, time, timedelta
 
-router = APIRouter(prefix="/expenses", tags=["Expenses"])
+router = APIRouter(prefix="/expenses", tags=["Expenses"], dependencies=[Depends(require_role("admin"))])
 
 
 def _looks_like_fuel(description: str | None) -> bool:

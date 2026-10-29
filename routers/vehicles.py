@@ -4,7 +4,7 @@ from typing import Optional
 from database import get_db
 from models import Vehicle, User
 from schemas import VehicleCreate, VehicleOut, VehicleUpdate
-from routers.auth import get_current_user
+from routers.auth import get_current_user, require_role
 
 FLEET_MANAGER_PHONE = "+254722760992"
 
@@ -30,7 +30,7 @@ def ensure_fleet_manager(current_user: User = Depends(get_current_user)) -> User
 router = APIRouter(prefix="/vehicles", tags=["Vehicles"])
 
 # ✅ Fetch all vehicles
-@router.get("/", response_model=list[VehicleOut])
+@router.get("/", response_model=list[VehicleOut], dependencies=[Depends(require_role("admin"))])
 def get_vehicles(db: Session = Depends(get_db)):
     return db.query(Vehicle).all()
 
@@ -63,7 +63,7 @@ def create_vehicle(
 
 
 # ✅ Fetch one vehicle by ID (used by frontend on vehicle select)
-@router.get("/{vehicle_id}")
+@router.get("/{vehicle_id}", dependencies=[Depends(require_role("admin"))])
 def get_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
     vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
     if not vehicle:

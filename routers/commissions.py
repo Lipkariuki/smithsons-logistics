@@ -1,3 +1,4 @@
+from routers.auth import require_role
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 from database import get_db
@@ -7,7 +8,7 @@ from typing import List
 from sqlalchemy import func
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/commissions", tags=["Commissions"])
+router = APIRouter(prefix="/commissions", tags=["Commissions"], dependencies=[Depends(require_role("admin"))])
 
 
 @router.post("/", response_model=CommissionOut)

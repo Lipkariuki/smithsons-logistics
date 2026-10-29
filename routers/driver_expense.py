@@ -5,6 +5,7 @@ from database import get_db
 from models import Expense, User
 from schemas import ExpenseCreate, ExpenseOut
 from routers.auth import get_current_user
+from routers.driver_trips import add_driver_expense
 
 router = APIRouter(prefix="/driver/expenses", tags=["Driver Expenses"])
 
@@ -14,11 +15,5 @@ def create_expense_as_driver(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "driver":
-        raise HTTPException(status_code=403, detail="Only drivers can post expenses")
-
-    db_expense = Expense(**expense.dict())
-    db.add(db_expense)
-    db.commit()
-    db.refresh(db_expense)
-    return db_expense
+    # Both URL spellings enforce the same driver and trip-ownership checks.
+    return add_driver_expense(expense=expense, db=db, current_user=current_user)

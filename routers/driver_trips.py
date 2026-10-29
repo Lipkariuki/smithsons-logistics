@@ -93,7 +93,7 @@ def add_driver_expense(
     if not trip:
         raise HTTPException(status_code=400, detail="Trip not found or not assigned to this driver.")
 
-    db_expense = Expense(**expense.dict())
+    db_expense = Expense(trip_id=trip.id, amount=expense.amount, description=expense.description)
     db.add(db_expense)
     db.commit()
     db.refresh(db_expense)
