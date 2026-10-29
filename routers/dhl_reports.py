@@ -342,6 +342,8 @@ def dhl_reconciliation(
     vehicle_plate: Optional[str] = Query(None),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
+    include_details: bool = False,
+    financial_version: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
@@ -585,6 +587,14 @@ def dhl_reconciliation(
     internal_total_revenue = round(sum(item.internal_revenue for item in rows), 2)
     dhl_total_revenue = round(sum(item.dhl_revenue for item in rows), 2)
 
+    details = None
+    if include_details:
+        if financial_version is not None and financial_version <= 0:
+            raise HTTPException(422, 'Financial version must be positive')
+        from services.dhl_reconciliation_detail import from_database
+        details = from_database(db, start, end, owner_id=owner_id, vehicle_id=vehicle_id,
+                                vehicle_plate=vehicle_plate, version=financial_version)
+
     return DHLReconciliationSummaryOut(
         period_start=start,
         period_end=end,
@@ -597,6 +607,7 @@ def dhl_reconciliation(
         matched_vehicle_count=sum(1 for item in rows if item.matched),
         mismatched_vehicle_count=sum(1 for item in rows if not item.matched),
         rows=rows,
+        details=details,
     )
 
 

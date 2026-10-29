@@ -428,6 +428,7 @@ class DHLReconciliationSummaryOut(BaseModel):
     matched_vehicle_count: int
     mismatched_vehicle_count: int
     rows: List[DHLReconciliationRowOut]
+    details: Optional[dict] = None
 
 
 class DHLPayslipExpenseIn(BaseModel):

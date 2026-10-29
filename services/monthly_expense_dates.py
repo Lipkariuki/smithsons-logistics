@@ -7,12 +7,13 @@ from decimal import Decimal
 import hashlib
 import io
 import re
+import unicodedata
 from openpyxl import load_workbook
 from services.monthly_expense_parser import validate_xlsx_envelope, normalize_header, money
 
 
 def _plate(value):
-    return ''.join(str(value or '').split()).upper()
+    return ''.join(unicodedata.normalize('NFKC',str(value or '')).split()).upper()
 
 
 def _ref(value):
@@ -88,7 +89,7 @@ def retain_source(content, month):
     return review
 
 
-def validate_source(review, dispositions, source, month):
+def validate_source(review, dispositions, source, month, *, target_plate=None, _inspected=None):
     """Reparse retained bytes every build/confirmation; flags cannot supply results."""
     def issue(code, message): return {'code': code, 'message': message, 'cell': None, 'blocking': True}
     if not review or not review.get('source_content_base64'):
@@ -97,7 +98,7 @@ def validate_source(review, dispositions, source, month):
         content = base64.b64decode(review['source_content_base64'], validate=True)
     except (ValueError, TypeError) as exc:
         raise ValueError('Retained raw workbook is invalid') from exc
-    actual, expected = inspect_source(content, month)
+    actual, expected = _inspected if _inspected is not None else inspect_source(content, month)
     if {k: v for k, v in review.items() if k != 'source_content_base64'} != actual:
         raise ValueError('Raw source review checksum or reporting month changed')
     known = {str(r['source_row']): r for r in actual['date_issues']}
@@ -110,16 +111,24 @@ def validate_source(review, dispositions, source, month):
         # Missing/invalid dates or amounts require source correction, never guessing.
         if decision and (row['code'] != 'out_of_period_date' or decision.get('action') != 'exclude_from_period' or not decision.get('reason', '').strip()):
             raise ValueError('Only historical dates can be explicitly excluded, with a review reason')
-        if not decision:
+        related = not target_plate or not re.fullmatch(r'[A-Z0-9]+', _plate(row['truck'])) or _plate(row['truck']) == target_plate
+        if not decision and related:
             result.append(issue(row['code'], f"Excel row {key}: {row['reason']}"))
     observed = {}
     for row in source:
+        if target_plate and _plate(row['truck_plate']) != target_plate:
+            continue
         key = (row['date'], _plate(row['truck_plate']), _ref(row['ref_no']))
         item = observed.setdefault(key, [Decimal('0.00'), Decimal('0.00')])
-        for index, field in enumerate(('distribution_cost', 'offloading_cost')):
-            item[index] += money(row[field])
-        if money(row['total_revenue']) != money(row['distribution_cost']) + money(row['offloading_cost']):
-            result.append(issue('source_gross_inconsistent', 'Stored DHL gross differs from its transport charges; source review required.'))
+        try:
+            for index, field in enumerate(('distribution_cost', 'offloading_cost')):
+                item[index] += money(row[field])
+            if money(row['total_revenue']) != money(row['distribution_cost']) + money(row['offloading_cost']):
+                result.append(issue('source_gross_inconsistent', 'Stored DHL gross differs from its transport charges; source review required.'))
+        except ValueError:
+            result.append(issue('invalid_source_amount','Stored transport amount is invalid; review its source.'))
+    if target_plate:
+        expected = {key: value for key, value in expected.items() if key[1] == target_plate}
     if expected != observed:
         result.append(issue('source_manifest_mismatch', 'The retained raw workbook does not match selected-month DHL records. Check source completeness; no revenue has been changed.'))
     return result

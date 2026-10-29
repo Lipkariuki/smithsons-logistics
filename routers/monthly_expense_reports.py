@@ -116,6 +116,18 @@ def _unique_object(pairs):
 def _view(conn, batch, **filters):
     versions = _run(list_versions, conn, batch['reporting_month'])
     view = _run(report_view, batch, versions, **filters)
+    from services.truck_confirmations import presentation
+    from services.monthly_expense_reports import decimal_json
+    states=_run(presentation,conn,batch)
+    if states is not None:
+        for row in view['rows']:
+            row['truck_confirmation']=decimal_json(states['rows'][row['id']])
+        view['truck_confirmation_summary']=decimal_json({k:v for k,v in states.items() if k!='rows'})
+        if any(s['current'] and s['current']['method']=='truck' and s['current']['expense_row_id']!=row_id
+               for row_id,s in states['rows'].items()):
+            view['can_confirm']=False
+        view['issues']=list(view['issues'])+[{'code':'truck_confirmation_scope','blocking':False,'cell':None,
+            'message':'Truck confirmations are version-specific. Review earlier truck approvals before whole-month corrections. Monthly totals describe this selected snapshot, not a payment ledger or a total of current truck approvals across versions.'}]
     view['review_warnings'] = [{'scope': scope, 'code': code, 'message': message}
                                for scope, code, message in warnings(view)]
     return view

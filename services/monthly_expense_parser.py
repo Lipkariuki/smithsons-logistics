@@ -203,9 +203,11 @@ def parse_expenses(
         trucks = [h for h in headers if h.classification == 'truck']
         if len(trucks) != 1:
             raise ValueError('Expected exactly one truck registration column')
-        if not used_categories:
-            issues.append(Issue('no_expense_categories', 'At least one approved expense category is required'))
-        # The optional absent category is the only automatically assumed zero.
+        # Absent categories contribute zero; they never inherit previous values.
+        # Omitted known categories are disclosed without inventing source columns.
+        for key, (label, _) in KNOWN.items():
+            if key not in used_categories and key != OPTIONAL_CATEGORY:
+                issues.append(Issue('category_absent_zero', f'{label} column absent; assuming 0.00', blocking=False))
         optional_absent = OPTIONAL_CATEGORY not in used_categories
         if optional_absent:
             issues.append(Issue('optional_category_absent', 'Kasarani & KSM Fuel column absent; assuming 0.00', blocking=False))
@@ -255,12 +257,23 @@ def parse_expenses(
                 if header.classification != 'expense':
                     continue
                 if cell.coordinate in corrections:
-                    value = corrections[cell.coordinate]
+                    original_amount = Decimal('0.00') if cell.data_type != 'f' and (value is None or str(value).strip() == '') else money(value)
+                    if money(corrections[cell.coordinate]) != original_amount:
+                        raise ValueError('Expenses must match the workbook; upload a corrected replacement workbook')
+                    value = original_amount
                     consumed.add(cell.coordinate)
                     source['approved_correction'] = str(value)
+                    if cell.data_type != 'f' and (cell.value is None or str(cell.value).strip() == ''):
+                        source.update(interpretation='blank_to_zero', interpreted_amount='0.00', policy='spreadsheet-expenses-v2')
                 elif cell.data_type == 'f':
                     row.issues.append(Issue('formula_cache_missing' if value is None else 'formula_cached',
                                             'Formula requires cached value; cached values may be stale', cell.coordinate, value is None))
+                elif value is None or (isinstance(value, str) and not value.strip()):
+                    value = Decimal('0.00')
+                    source['interpretation'] = 'blank_to_zero'
+                    source['interpreted_amount'] = '0.00'
+                    source['policy'] = 'spreadsheet-expenses-v2'
+                    row.issues.append(Issue('blank_expense_zero', 'Blank expense cell interpreted as KES 0.00 from workbook policy', cell.coordinate, False))
                 try:
                     amount = money(value)
                 except ValueError:

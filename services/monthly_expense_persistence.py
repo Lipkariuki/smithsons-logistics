@@ -20,7 +20,8 @@ from services.monthly_expense_calculations import RevenueEvidence, RevenueStatus
 from services.monthly_expense_reconciliation import validate_reference_columns
 from services.monthly_expense_dates import validate_source
 
-POLICY = {'version': 'monthly-expenses-v1', 'parser_version': 'flexible-xlsx-v1',
+POLICY = {'version': 'monthly-expenses-v2', 'parser_version': 'flexible-xlsx-v2',
+          'blank_expenses': 'zero_with_audit', 'absent_categories': 'zero_no_carry_forward',
           'currency': 'KES', 'rounding': 'ROUND_HALF_UP', 'scale': 2,
           'commission_rate': '0.07', 'positive_base_only': True}
 
@@ -126,7 +127,8 @@ def _build(conn, content, month, decisions, actor, audit_time):
         for key, amount in row.expenses.items():
             header = next((h for h in preview.headers if h.category == key), None)
             deductions[key] = {'amount': None if amount is None else format(amount, '.2f'),
-                               'resolution': 'source' if header else 'absent_optional_category',
+                               'resolution': ('blank_to_zero' if header and row.source_values.get(f'{_column(header.column)}{row.row_number}', {}).get('interpretation') == 'blank_to_zero'
+                                              else 'source') if header else 'absent_optional_category',
                                'label': header.label if header else 'Kasarani & KSM Fuel',
                                'original_header': header.original_header if header else None,
                                'source_cell': f'{_column(header.column)}{row.row_number}' if header else None}
@@ -158,8 +160,8 @@ def _build(conn, content, month, decisions, actor, audit_time):
     if not decisions['source_verification']:
         batch_issues.append({'code': 'source_unverified', 'message': 'Month completeness verification required',
                              'cell': None, 'blocking': True})
-    assumptions = [dict(asdict(i), amount='0.00', category=OPTIONAL_CATEGORY)
-                   for i in preview.issues if i.code == 'optional_category_absent']
+    assumptions = [dict(asdict(i), amount='0.00')
+                   for i in preview.issues if i.code in {'optional_category_absent', 'category_absent_zero'}]
     return dict(header_mappings=header_mappings, assumptions=assumptions, issues=batch_issues), payloads, fingerprint
 
 
@@ -296,6 +298,13 @@ def confirm_import(conn, import_id, confirmer_id):
     if not expected_rows or any(i['blocking'] for i in expected['issues']) or any(
         i['blocking'] for row in expected_rows for i in row['issues']):
         raise ValidationBlocked('Required validation or revenue issues remain unresolved')
+    from services.truck_confirmations import available, confirmations
+    if available(conn):
+        current_trucks=conn.execute(select(confirmations).where(confirmations.c.reporting_month==month,
+            confirmations.c.status=='current',confirmations.c.method=='truck')).mappings()
+        selected={r['normalized_plate']:r['id'] for r in batch['rows']}
+        if any(selected.get(c['normalized_plate']) not in (None,c['expense_row_id']) for c in current_trucks):
+            raise VersionConflict('Explicitly confirm truck corrections before confirming this whole-month version')
     current = conn.execute(select(imports.c.id).where(imports.c.reporting_month == month,
                                                      imports.c.status == 'confirmed')).scalar()
     if current is not None:

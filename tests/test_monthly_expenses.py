@@ -90,17 +90,18 @@ class ParserTests(unittest.TestCase):
             preview = parse_expenses(workbook(HEADERS + [label], [VALUES + [9999999]]), MONTH)
             self.assertEqual(preview.rows[0].expenses, first.expenses)
 
-    def test_blank_needs_explicit_correction_zero_is_valid(self):
+    def test_blank_is_zero_with_audit_and_explicit_correction_still_supported(self):
         values = VALUES.copy()
         values[3] = None
         content = workbook(rows=[values])
         pending = parse_expenses(content, MONTH)
-        self.assertFalse(pending.ready)
-        self.assertIsNone(pending.rows[0].expenses['telematics_vss'])
+        self.assertTrue(pending.ready)
+        self.assertEqual(pending.rows[0].expenses['telematics_vss'], Decimal('0.00'))
+        self.assertEqual(pending.rows[0].source_values['D3']['interpretation'], 'blank_to_zero')
         approved = parse_expenses(content, MONTH, corrections={'D3': '0'})
         self.assertTrue(approved.ready)
         self.assertIsNone(approved.rows[0].source_values['D3']['original_value'])
-        self.assertEqual(approved.rows[0].source_values['D3']['approved_correction'], '0')
+        self.assertEqual(approved.rows[0].source_values['D3']['approved_correction'], '0.00')
         with self.assertRaises(ValueError):
             parse_expenses(content, MONTH, corrections={'J3': 0})
 
@@ -172,10 +173,10 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(preview.sheet, 'Sheet1')
         self.assertEqual(len(preview.rows), 32)
         self.assertEqual(preview.header_row, 2)
-        self.assertFalse(preview.ready)
+        self.assertTrue(preview.ready)
         self.assertEqual([i.code for i in preview.issues], ['optional_category_absent'])
         self.assertEqual([(r.plate, i.cell, i.code) for r in preview.rows for i in r.issues],
-                         [('KCE726U', 'D17', 'blank_expense')])
+                         [('KCE726U', 'D17', 'blank_expense_zero')])
         # Confirmation is simulated explicitly; the original workbook is untouched.
         confirmed = parse_expenses(content, MONTH, corrections={'D17': '0.00'})
         self.assertTrue(confirmed.ready)

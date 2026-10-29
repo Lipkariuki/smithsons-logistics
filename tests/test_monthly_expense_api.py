@@ -319,7 +319,7 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(preview['ready'])
         self.assertIn('optional_category_absent',[i['code'] for i in preview['issues']])
         self.assertEqual(len(preview['decisions']['historical_review']['out_of_month_records']),6)
-        self.assertTrue(any(i['cell']=='D17' and i['code']=='blank_expense' for row in preview['rows'] for i in row['issues']))
+        self.assertTrue(any(i['cell']=='D17' and i['code']=='blank_expense_zero' for row in preview['rows'] for i in row['issues']))
         self.assertTrue(all(row['comparisons']['net_payable']['status']=='unverified_reference' for row in preview['rows']))
         with self.engine.begin() as conn:
             self.assertEqual(conn.execute(text('SELECT count(*) FROM dhl_monthly_expense_imports')).scalar_one(),0)
@@ -398,8 +398,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(saved['version'],2);self.assertEqual(saved['file_sha256'],original['file_sha256'])
         self.assertEqual(self.request('POST',f"/dhl-reports/expense-imports/{saved['id']}/confirm")[0],200)
         old=self.request('GET',f"/dhl-reports/expense-imports/{original['id']}")[1]
-        self.assertIsNone(old['rows'][0]['deductions']['fuel']['amount'])
-        self.assertFalse(old['can_confirm'])
+        self.assertEqual(old['rows'][0]['deductions']['fuel']['amount'], '0.00')
+        self.assertTrue(old['can_confirm'])
 
     def test_verified_operating_expense_comparison_and_export(self):
         wb=load_workbook(io.BytesIO(fixtures.book()));ws=wb.active

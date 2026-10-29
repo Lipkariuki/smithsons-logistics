@@ -136,10 +136,10 @@ class PersistenceTests(unittest.TestCase):
         with self.assertRaises(DuplicateUpload), self.engine.begin() as conn:
             self.draft(conn)
         with self.engine.begin() as conn:
-            second = self.draft(conn, corrections={'B3': '125.00'}, reason='Explicit fuel correction', previous_version_id=first['id'])
+            second = self.draft(conn, content=book(125), reason='Corrected replacement workbook', previous_version_id=first['id'])
             self.assertEqual(second['version'], 2)
-            self.assertEqual(second['rows'][0]['cell_audit']['B3']['approved_correction'], '125.00')
-            self.assertEqual(second['rows'][0]['cell_audit']['B3']['approved_by'], 7)
+            self.assertEqual(second['rows'][0]['deductions']['fuel']['amount'], '125.00')
+            self.assertNotIn('approved_correction', second['rows'][0]['cell_audit']['B3'])
             self.assertEqual(len(list_versions(conn, MONTH)), 2)
 
     def test_version_history_and_immutable_confirmed_content(self):
@@ -163,7 +163,7 @@ class PersistenceTests(unittest.TestCase):
             conn.execute(update(rows).where(rows.c.id == row_id).values(net_payable=0))
 
     def test_validation_blank_unknown_and_missing_revenue_block(self):
-        for content, delete_source in [(book(blank=True), False), (book(extra=True), False), (book(), True)]:
+        for content, delete_source in [(book(extra=True), False), (book(), True)]:
             with self.subTest(blank=content[:4], missing=delete_source):
                 with self.engine.begin() as conn:
                     if delete_source:
