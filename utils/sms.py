@@ -2,10 +2,33 @@ import os
 import logging
 
 from services.africastalking_client import get_sms_client
+from settings import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
 SENDER_ID = os.getenv("AFRICASTALKING_SENDER_ID", "Smithsons")
+
+
+def _accepted(response, expected):
+    """API acceptance is not handset delivery. Never log the raw response."""
+    if not isinstance(response, dict):
+        return False, []
+    data = response.get("SMSMessageData")
+    recipients = data.get("Recipients") if isinstance(data, dict) else None
+    if not isinstance(recipients, list) or len(recipients) != expected:
+        return False, []
+    codes = []
+    accepted = True
+    for recipient in recipients:
+        if not isinstance(recipient, dict):
+            accepted = False
+            continue
+        code = recipient.get("statusCode")
+        # Whitelist diagnostics: provider fields can contain user data or secrets.
+        code = int(code) if isinstance(code, (str, int)) and str(code).isdigit() else None
+        codes.append(code if code in {100, 101, 102, 401, 402, 403, 404, 405, 406, 407, 500, 501, 502} else None)
+        accepted &= code in {100, 101, 102} if code is not None else recipient.get("status") == "Success"
+    return accepted, codes
 
 
 def _normalize_phone(phone: str) -> str:
@@ -56,8 +79,16 @@ def send_sms(recipients: list[str], message: str):
                 )
             else:
                 raise
-        logger.info("SMS provider request completed")
+        accepted, codes = _accepted(response, len(normalized_recipients))
+        if not accepted:
+            logger.warning("SMS provider rejected or did not acknowledge all recipients; status_codes=%s", codes)
+            return {"error": "SMS was not accepted for all recipients; check provider status", "code": "provider_rejected", "status_codes": codes}
+        logger.info("SMS accepted by provider; recipient_count=%s status_codes=%s; handset delivery not confirmed", len(normalized_recipients), codes)
         return response
-    except Exception:
-        logger.warning("SMS provider request failed; verify configuration and provider status")
-        return {"error": "SMS delivery failed; verify configuration and provider status"}
+    except Exception as exc:
+        response = getattr(exc, "response", None)
+        http_status = getattr(response, "status_code", None)
+        http_status = http_status if isinstance(http_status, int) and 100 <= http_status <= 599 else None
+        code = "configuration_missing" if isinstance(exc, ConfigurationError) else "provider_authentication" if http_status in {401, 403} else "provider_request_failed"
+        logger.warning("SMS request failed; reason=%s http_status=%s; verify provider configuration", code, http_status)
+        return {"error": "SMS delivery failed; verify configuration and provider status", "code": code}

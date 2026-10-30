@@ -183,7 +183,7 @@ class SMSConfigurationTests(unittest.TestCase):
         self.assertTrue(bool(response['error']))
 
     def test_sender_keyword_compatibility_remains(self):
-        client=Mock();client.send.side_effect=[TypeError("unexpected keyword argument 'sender_id'"),{'ok':True}]
+        client=Mock();client.send.side_effect=[TypeError("unexpected keyword argument 'sender_id'"),{'ok':True,'SMSMessageData':{'Recipients':[{'status':'Success'}]}}]
         with patch.object(sms,'get_sms_client',return_value=client):response=sms.send_sms(['0700000007'],'synthetic-message')
         self.assertTrue(response['ok']);self.assertEqual(client.send.call_count,2)
         self.assertIn('senderId',client.send.call_args.kwargs)

@@ -386,8 +386,10 @@ def send_vehicle_report(payload: SendReportPayload, db: Session = Depends(get_db
             message_lines.append(f"Balance: Ksh {report.variance:,.2f}")
 
     message = " ".join(message_lines)
-    send_sms([report.owner_phone], message)
-    return {"status": "sent", "message": message}
+    result = send_sms([report.owner_phone], message)
+    if not isinstance(result, dict) or result.get("error"):
+        raise HTTPException(status_code=502, detail="SMS could not be accepted by the provider. Check SMS configuration and provider status before retrying.")
+    return {"status": "accepted", "message": "Report accepted by SMS provider. Handset delivery is not yet confirmed."}
 
 
 @router.get("/pdf/{vehicle_id}")
