@@ -97,10 +97,13 @@ class ApiTests(unittest.TestCase):
     def tearDown(self):
         fixtures.PersistenceTests.tearDown(self)
 
-    def request(self, method, url, content=None, options=None, filename='expense.xlsx', raw=None, user=7, token=None, form_fields=None):
+    def request(self, method, url, content=None, options=None, filename='expense.xlsx', raw=None, user=7, token=None, form_fields=None, json_body=None):
         path, _, query = url.partition('?')
         headers = []
         body = b''
+        if json_body is not None:
+            body = json.dumps(json_body).encode()
+            headers += [(b'content-type', b'application/json')]
         if content is not None or form_fields is not None:
             if raw is None and form_fields is None:
                 with self.engine.begin() as connection:
