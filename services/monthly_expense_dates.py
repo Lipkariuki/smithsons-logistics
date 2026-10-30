@@ -10,6 +10,7 @@ import re
 import unicodedata
 from openpyxl import load_workbook
 from services.monthly_expense_parser import validate_xlsx_envelope, normalize_header, money
+from services.monthly_reporting_scope import request_read
 
 
 def _plate(value):
@@ -21,6 +22,7 @@ def _ref(value):
     return text[:-2] if text.endswith('.0') else text
 
 
+@request_read
 def inspect_source(content: bytes, month: date):
     validate_xlsx_envelope(content)
     wb = load_workbook(io.BytesIO(content), data_only=True)
@@ -89,7 +91,8 @@ def retain_source(content, month):
     return review
 
 
-def charge_issues(content, month, target_plate=None):
+@request_read
+def _charge_scan(content, month):
     """Flag ambiguous/repeated transport charges; never silently deduplicate.
 
     Keep these diagnostics separate from the immutable v1 review metadata so
@@ -114,26 +117,36 @@ def charge_issues(content, month, target_plate=None):
             if day is None or (day.year, day.month) != (month.year, month.month):
                 continue  # Strict date validation handles these separately.
             plate = _plate(ws.cell(row, names['truck']).value)
-            if target_plate and plate and plate != target_plate:
-                continue
             label = str(ws.cell(row, names['cost']).value or '').strip().casefold()
+            # Exact known aliases only: January uses Offload, while February
+            # uses Offloading. Canonicalize before duplicate detection so an
+            # alias cannot disguise a repeated charge. Leave manifest metadata
+            # unchanged to preserve existing immutable workbook references.
+            label = {'dist': 'dist', 'offload': 'offloading',
+                     'offloading': 'offloading', 'admin': 'admin'}.get(label)
             if label == 'admin':
                 continue
-            if label not in {'dist', 'offloading'}:
-                result.append({'code': 'unsupported_source_charge', 'cell': None, 'blocking': True,
-                    'message': f'Excel row {row}: COST must be DIST, Offloading or Admin. Review the source charge type.'})
+            if label is None:
+                original = str(ws.cell(row, names['cost']).value or '').strip()
+                result.append((plate, {'code': 'unsupported_source_charge', 'cell': None, 'blocking': True,
+                    'message': f'Excel row {row}: unrecognized COST {original!r}. Expected DIST, Offload, Offloading or Admin. Review the source charge type.'}))
                 continue
             try: amount = money(ws.cell(row, names['amount']).value)
             except ValueError: continue  # inspect_source already reports it.
             key = (day, plate, _ref(ws.cell(row, names['ref no']).value), label, amount)
             if key in found:
-                result.append({'code': 'duplicate_source_row', 'cell': None, 'blocking': True,
-                    'message': f'Excel rows {found[key]} and {row}: repeated {label} charge for {plate}, ref {key[2]}. Check the original; no duplicate has been removed automatically.'})
+                result.append((plate, {'code': 'duplicate_source_row', 'cell': None, 'blocking': True,
+                    'message': f'Excel rows {found[key]} and {row}: repeated {label} charge for {plate}, ref {key[2]}. Check the original; no duplicate has been removed automatically.'}))
             else:
                 found[key] = row
         return result
     finally:
         wb.close()
+
+
+def charge_issues(content, month, target_plate=None):
+    return [issue for plate, issue in _charge_scan(content, month)
+            if not target_plate or not plate or plate == target_plate]
 
 
 def validate_source(review, dispositions, source, month, *, target_plate=None, _inspected=None):

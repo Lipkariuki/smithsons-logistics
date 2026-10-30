@@ -14,6 +14,23 @@ SYSTEM_REVIEW = ('System checked the retained workbook against selected-month DH
                  'Each truck must pass strict source validation and explicit administrator confirmation; '
                  'this is not a human approval or a no-activity attestation.')
 
+ALIAS_REVIEW = 'Known COST aliases revalidated; Offload and Offloading represent the same transport charge.'
+
+
+def _alias_review_needed(batch, raw):
+    """An old rejected draft may become calculable after exact alias support.
+
+    Recheck, never rewrite its snapshot. Unknown charges still block; a user
+    action must append an audited version before confirmation can occur.
+    """
+    old_count = sum(i['code'] == 'unsupported_source_charge' for i in batch['issues'])
+    if not raw or not old_count:
+        return False
+    from services.monthly_expense_dates import charge_issues
+    new_count = sum(i['code'] == 'unsupported_source_charge'
+                    for i in charge_issues(bytes(raw['content']), batch['reporting_month']))
+    return new_count < old_count
+
 
 def latest(conn, month):
     identifier = conn.execute(select(imports.c.id).where(imports.c.reporting_month == month)
@@ -48,6 +65,7 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
     old = previous['decisions'] if previous else {}
     replacing = content is not None
     same_raw = bool(raw and (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'])
+    alias_review = bool(previous and same_raw and _alias_review_needed(previous, raw))
     options = dict(
         approved_mappings=mappings if mappings is not None else old.get('approved_mappings', {}),
         # A replacement workbook is the whole expense source; never carry old
@@ -57,11 +75,12 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
         source_verification=SYSTEM_REVIEW if raw else '',
         historical_review=files.reference(raw) if raw else None,
         date_dispositions=old.get('date_dispositions', {}) if same_raw else {},
-        reason='Saved workbook calculations; pending individual administrator confirmation',
+        reason=('Saved workbook calculations; pending individual administrator confirmation'
+                + ('; ' + ALIAS_REVIEW if alias_review else '')),
         previous_version_id=previous['id'] if previous else None,
     )
     import hashlib
-    if previous and raw and old.get('source_verification') and same_raw and not old.get('corrections'):
+    if previous and raw and old.get('source_verification') and same_raw and not old.get('corrections') and not alias_review:
         _, fingerprint = _sources(conn, month)
         incoming = content if replacing else bytes(previous['source_content'])
         if (hashlib.sha256(incoming).hexdigest() == previous['file_sha256']
@@ -92,7 +111,7 @@ def state(conn, month):
     if batch and raw and batch['status'] == 'draft':
         _, fingerprint = _sources(conn, month)
         old = batch['decisions']
-        if not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections'):
+        if not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw):
             # GET is strictly read-only. Old drafts can display an automatic
             # preview; only a user upload/review/issue action appends a draft.
             batch = preview_import(conn, bytes(batch['source_content']), month, batch['uploader_id'],

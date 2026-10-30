@@ -9,6 +9,7 @@ from sqlalchemy import MetaData, Table, Column, BigInteger, Integer, String, Dat
 from sqlalchemy.dialects.postgresql import JSONB
 from services.monthly_expense_models import imports, rows
 from services.monthly_expense_dates import inspect_source, retain_source, validate_source
+from services.monthly_reporting_scope import request_read
 
 MAX_BYTES=20_000_000
 metadata=MetaData()
@@ -41,6 +42,7 @@ def register(conn,content,month,filename,actor,previous_id=None,reason=''):
  return get(conn,identifier)
 
 
+@request_read
 def get(conn,identifier):
  return dict(conn.execute(select(workbooks).where(workbooks.c.id==identifier)).mappings().one())
 

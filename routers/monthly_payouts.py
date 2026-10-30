@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from routers.monthly_expense_reports import _run, _upload, _view
 from services import monthly_payouts as payouts
 from services.monthly_expense_reports import decimal_json, totals
+from services.monthly_reporting_scope import reporting_read_scope
 
 
 class SyncRequest(BaseModel):
@@ -22,6 +23,10 @@ def create_router(connection_dependency, admin_dependency):
     router = APIRouter(prefix='/dhl-reports/monthly-payouts', tags=['Monthly Payouts'], dependencies=[Depends(no_cache)])
 
     def view(conn, month):
+        with reporting_read_scope():
+            return render_month(conn, month)
+
+    def render_month(conn, month):
         metadata, batch = _run(payouts.state, conn, month)
         from services.truck_confirmations import presentation
         saved = _run(payouts.latest, conn, month)

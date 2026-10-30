@@ -1,6 +1,12 @@
 """Simple facade tests; only disposable local PostgreSQL, never production."""
 import io
 import unittest
+from unittest.mock import patch
+from contextlib import nullcontext
+from datetime import date
+from pathlib import Path
+from time import perf_counter
+import json
 from decimal import Decimal
 from openpyxl import load_workbook
 from sqlalchemy import text
@@ -53,6 +59,40 @@ class SimplePayoutTests(unittest.TestCase):
         with self.engine.begin() as conn:
             self.assertIsNone(get_import(conn,old['id'])['rows'][0]['gross'])
             self.assertEqual(conn.execute(text('SELECT count(*) FROM dhl_monthly_expense_imports')).scalar_one(),1)
+
+    def test_old_alias_rejection_reopens_readonly_and_explicit_review_creates_new_version(self):
+        wb=load_workbook(io.BytesIO(self.raw));wb.active['D3']='Offload';out=io.BytesIO();wb.save(out);wb.close()
+        legacy_issue=dict(code='unsupported_source_charge',message='Old strict validator rejected Offload',cell=None,blocking=True)
+        with self.engine.begin() as conn:
+            before=self.legacy(conn);self.archive(conn,out.getvalue())
+            with patch('services.monthly_expense_dates.charge_issues',return_value=[legacy_issue]):
+                old=self.sync(conn,content=fixture.book(),filename='net.xlsx')
+            self.assertIsNone(old['rows'][0]['gross'])
+        status,body,_=self.request('GET','/dhl-reports/monthly-payouts/2026-02-01')
+        self.assertEqual(status,200,body);self.assertEqual(body['report']['status'],'preview')
+        self.assertEqual(body['report']['rows'][0]['gross'],'1000.00')
+        with self.engine.begin() as conn:
+            self.assertEqual(get_import(conn,old['id']),old)
+            self.assertEqual(conn.execute(text('SELECT count(*) FROM dhl_monthly_expense_imports')).scalar_one(),1)
+            self.assertEqual(conn.execute(text('SELECT count(*) FROM dhl_monthly_truck_confirmations')).scalar_one(),0)
+            revised=self.sync(conn)
+            self.assertEqual(revised['version'],2)
+            self.assertIn('Known COST aliases revalidated',revised['decisions']['reason'])
+            self.assertEqual(revised['rows'][0]['net_payable'],Decimal('744.00'))
+            self.assertEqual(self.sync(conn)['id'],revised['id'])
+            confirm_truck(conn,revised['rows'][0]['id'],7,'Synthetic alias review only')
+            doc=create_document(conn,revised['rows'][0]['id'],7)
+            self.assertEqual(bytes(get_document(conn,doc['id'])['pdf_content']),bytes(doc['pdf_content']))
+            self.assertEqual(self.legacy(conn),before)
+
+    def test_unknown_cost_stays_blocked_without_a_spurious_alias_revision(self):
+        wb=load_workbook(io.BytesIO(self.raw));wb.active['D3']='Dist / Offload';out=io.BytesIO();wb.save(out);wb.close()
+        with self.engine.begin() as conn:
+            self.archive(conn,out.getvalue());old=self.sync(conn,content=fixture.book(),filename='net.xlsx')
+            _,current=payout.state(conn,fixture.MONTH)
+            self.assertEqual(current['id'],old['id'])
+            self.assertIsNone(current['rows'][0]['gross'])
+            with self.assertRaises(ValidationBlocked):confirm_truck(conn,current['rows'][0]['id'],7,'Cannot guess COST')
 
     def test_replacement_preserves_pdf_and_never_accumulates_expenses(self):
         with self.engine.begin() as conn:
@@ -140,3 +180,36 @@ class SimplePayoutTests(unittest.TestCase):
         self.assertEqual(code,200,body)
         code,again,_=self.request('POST','/dhl-reports/monthly-payouts/2026-02-01/sync',json_body={'expected_report_id':body['files']['latest_report_id'],'expected_raw_id':raw['id']})
         self.assertEqual(code,200,again);self.assertEqual(again['files']['latest_report_id'],body['files']['latest_report_id'])
+
+    @unittest.skipUnless((Path(__file__).resolve().parents[1]/'data/JANUARY NET SUMMARY.xlsx').exists(), 'Actual January fixtures required')
+    def test_january_month_view_reuses_reads_without_changing_any_results(self):
+        from services.monthly_expense_dates import inspect_source, load_workbook
+        from services.monthly_files import register
+        from services.monthly_expense_parser import parse_expenses
+        month=date(2026,1,1);root=Path(__file__).resolve().parents[1]/'data'
+        raw=(root/'JANUARY 2026 TRIPS SUMMARY (1).xlsx').read_bytes();net=(root/'JANUARY NET SUMMARY.xlsx').read_bytes()
+        _,manifest=inspect_source(raw,month)
+        plates=sorted({k[1] for k in manifest}|{r.plate for r in parse_expenses(net,month).rows})
+        with self.engine.begin() as conn:
+            conn.execute(text('DELETE FROM dhl_orders'))
+            for i,plate in enumerate(plates,100):
+                conn.execute(text("INSERT INTO vehicles VALUES(:id,:plate,7,'30T')"),dict(id=i,plate=plate))
+            for i,(key,amount) in enumerate(manifest.items(),1000):
+                conn.execute(text('INSERT INTO dhl_orders VALUES(:id,:ref,:date,:plate,:vehicle,:dist,:off,:gross)'),
+                    dict(id=i,ref=key[2],date=key[0],plate=key[1],vehicle=100+plates.index(key[1]),dist=amount[0],off=amount[1],gross=sum(amount)))
+            saved=register(conn,raw,month,'january.xlsx',7)
+            payout.synchronize(conn,month,7,expected_report_id=None,expected_raw_id=saved['id'],content=net,filename='net.xlsx')
+            before=self.legacy(conn)
+        url='/dhl-reports/monthly-payouts/2026-01-01'
+        with patch('routers.monthly_payouts.reporting_read_scope',return_value=nullcontext()),patch('services.monthly_expense_dates.load_workbook',wraps=load_workbook) as opens:
+            start=perf_counter();status,baseline,_=self.request('GET',url);old_seconds=perf_counter()-start;old_opens=opens.call_count
+        self.assertEqual(status,200,baseline)
+        with patch('services.monthly_expense_dates.load_workbook',wraps=load_workbook) as opens:
+            start=perf_counter();status,optimized,_=self.request('GET',url);new_seconds=perf_counter()-start;new_opens=opens.call_count
+        self.assertEqual(status,200,optimized);self.assertEqual(optimized,baseline)
+        self.assertEqual(new_opens,2);self.assertGreater(old_opens,new_opens*10)
+        with self.engine.begin() as conn:self.assertEqual(self.legacy(conn),before)
+        # Local evidence only; never writes financial fixtures or production data.
+        Path('/tmp/smithsons-month-loading-benchmark.json').write_text(json.dumps(dict(
+            trucks=len(plates),source_rows=747,unoptimized_seconds=old_seconds,optimized_seconds=new_seconds,
+            unoptimized_workbook_opens=old_opens,optimized_workbook_opens=new_opens,identical_response=True)))
