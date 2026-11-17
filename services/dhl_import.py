@@ -101,6 +101,20 @@ def parse_dhl_excel(content: bytes) -> tuple[list[dict], date, date]:
     if missing:
         raise ValueError(f"Missing required columns: {', '.join(sorted(missing))}")
 
+    from services.dhl_revenue_policy import is_new_format, inspect_transport
+    from services.monthly_expense_parser import normalize_header
+    if is_new_format({normalize_header(c) for c in df.columns}):
+        dates=[_parse_date(v) for v in df.loc[df['DATE'].notna(),'DATE'] if _parse_date(v) is not None]
+        start,end=_period_bounds(dates)
+        from services.monthly_expense_dates import inspect_source
+        _,groups=inspect_source(content,start)
+        # Keep inclusive source cells once. Financial discrepancies are retained
+        # for truck review, never silently fixed or dropped during import.
+        if not groups:raise ValueError('No valid DHL transport rows')
+        return [dict(date=date.fromisoformat(k[0]),ref_no=k[2],truck_plate=k[1],
+                     distribution_cost=float(v[0]),offloading_cost=float(v[1]),total_revenue=float(v[0]+v[1]))
+                for k,v in groups.items()],start,end
+
     df = df[df["DATE"].notna()]
 
     records: dict[tuple[date, str, str], dict] = {}

@@ -169,6 +169,14 @@ def parse_expenses(
         used_categories: set[str] = set()
         for cell in ws[header_row]:
             if cell.value is None:
+                # Only an unlabeled first-column 1..N index beside a known
+                # truck column is nonfinancial. Other unknown columns still block.
+                if cell.column == 1 and normalize_header(str(ws.cell(header_row,2).value)) in TRUCK_HEADERS:
+                    ordinal=[ws.cell(r,1) for r in range(header_row+1,ws.max_row+1)
+                             if ws.cell(r,2).value is not None and normalize_header(str(ws.cell(r,2).value)) not in {'total','totals','grand total'}]
+                    if ordinal and all(c.data_type!='f' and not isinstance(c.value,bool) and c.value==i for i,c in enumerate(ordinal,1)):
+                        headers.append(HeaderMapping(1,'[row number]','row number','ignored',None,None,'verified_ordinal'))
+                        continue
                 if any(ws.cell(r, cell.column).value is not None for r in range(header_row + 1, ws.max_row + 1)):
                     issues.append(Issue('missing_header', 'Populated column has no header', cell.coordinate))
                 continue

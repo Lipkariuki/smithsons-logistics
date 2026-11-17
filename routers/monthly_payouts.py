@@ -42,6 +42,9 @@ def create_router(connection_dependency, admin_dependency):
                     original = next(r for r in batch['rows'] if r['normalized_plate'] == row['normalized_plate'])
                     dist, off = _run(transport_components, original)
                     row['revenue_breakdown'] = dict(distribution=format(dist,'.2f'), offloading=format(off,'.2f'))
+                    transport=original.get('cell_audit',{}).get('_dhl_transport')
+                    if transport:
+                        row['revenue_breakdown'].update(distribution=transport['distribution'],surcharge=transport['surcharge'])
         return dict(files=decimal_json(metadata), report=report,
                     approvals=decimal_json(states['current_approvals']) if states else [])
 

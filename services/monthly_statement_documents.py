@@ -15,6 +15,7 @@ from services.monthly_expense_models import imports, rows
 from utils.payslip_branding import payslip_text
 
 RENDERER = 'smithsons-monthly-statement-v3-revenue-breakdown'
+DIST_ADMIN_RENDERER = 'smithsons-monthly-statement-v4-dist-admin'
 metadata = MetaData()  # Deliberately excluded from application create_all.
 documents = Table('monthly_statement_documents', metadata,
     Column('id', BigInteger, primary_key=True),
@@ -40,7 +41,8 @@ def validate_snapshot(row):
     if any(not a.is_finite() for a in amounts):
         raise ValueError('Invalid deduction snapshot')
     total = sum(amounts, Decimal('0.00'))
-    base = row['gross'] - total
+    from services.dhl_revenue_policy import snapshot_fee
+    base = row['gross'] - total - snapshot_fee(row)
     commission = (max(base, Decimal('0.00')) * Decimal('.07')).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
     if (total != row['operating_expenses'] or base != row['commission_base']
         or commission != row['commission'] or base - commission != row['net_payable']):
@@ -117,9 +119,15 @@ def render_statement(row, batch):
             pdf.cell(0,7,f'KES {amount:,.2f}' if index==0 else '',border=border,align='R')
             pdf.set_xy(x,y+7)
 
+    transport=row.get('cell_audit',{}).get('_dhl_transport')
+    if transport:
+        from services.monthly_expense_parser import money
+        distribution=money(transport['distribution'])
     line('Distribution Revenue', distribution)
     line('Offloading Revenue', offloading)
+    if transport:line('DIST Surcharge', money(transport['surcharge']))
     line('Gross Transport Revenue', row['gross'], True)
+    if transport:line('Administration Fee (5% of DIST including surcharge)', money(transport['admin_fee']))
     itemized=Decimal('0.00')
     columns={h['category']:h['column'] for h in batch.get('header_mappings',[]) if h['classification']=='expense'}
     for category,item in sorted(row['deductions'].items(),key=lambda entry:columns.get(entry[0],10000)):
@@ -131,7 +139,7 @@ def render_statement(row, batch):
     line('Total Expenses', row['operating_expenses'], True)
     line('Commission Base', row['commission_base'])
     line('Commission (7% of positive commission base)', row['commission'])
-    line('Total Deductions', row['operating_expenses'] + row['commission'])
+    line('Total Deductions', row['operating_expenses'] + row['commission'] + (money(transport['admin_fee']) if transport else Decimal('0.00')))
     line('Net Payable', row['net_payable'], True)
     pdf.ln(5)
     pdf.set_font('Statement', '', 10)
@@ -185,7 +193,7 @@ def create_document(conn, row_id, actor_id):
         .order_by(imports.c.version.desc()).limit(1)).scalar_one_or_none()
     content = render_statement(row, dict(batch,truck_confirmation=approval))
     identifier = conn.execute(insert(documents).values(expense_row_id=row_id, previous_document_id=previous,
-        pdf_content=content, pdf_sha256=hashlib.sha256(content).hexdigest(), renderer_version=RENDERER,
+        pdf_content=content, pdf_sha256=hashlib.sha256(content).hexdigest(), renderer_version=DIST_ADMIN_RENDERER if row.get('cell_audit',{}).get('_dhl_transport') else RENDERER,
         generated_by=actor_id, generated_at=text('CURRENT_TIMESTAMP')).returning(documents.c.id)).scalar_one()
     return get_document(conn, identifier)
 

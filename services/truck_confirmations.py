@@ -7,7 +7,7 @@ from sqlalchemy import (MetaData, Table, Column, BigInteger, Integer, String, Da
 from sqlalchemy.dialects.postgresql import JSONB
 
 from services.monthly_expense_models import imports, rows
-from services.monthly_expense_persistence import (_lock, _hash, _build, _sources, get_import, POLICY,
+from services.monthly_expense_persistence import (_lock, _hash, _build, _sources, get_import, POLICY, supported_policy,
     ValidationBlocked, VersionConflict, SourceChanged)
 from services.monthly_expense_dates import validate_source, inspect_source
 from services.monthly_expense_persistence import _plate
@@ -28,7 +28,7 @@ def available(conn):
 
 
 def _context(conn,batch):
-    if batch['calculation_policy'] != POLICY:
+    if not supported_policy(batch['calculation_policy']):
         raise ValidationBlocked('Revise this report into the current calculation policy')
     import hashlib
     if hashlib.sha256(bytes(batch['source_content'])).hexdigest()!=batch['file_sha256'] or _hash(batch['decisions'])!=batch['decisions_sha256']:
@@ -37,6 +37,8 @@ def _context(conn,batch):
         raise ValidationBlocked('Source verification changed')
     expected, expected_rows, _ = _build(conn,bytes(batch['source_content']),batch['reporting_month'],
         batch['decisions'],batch['uploader_id'],batch['created_at'].isoformat())
+    if batch['calculation_policy']!=expected['calculation_policy']:
+        raise ValidationBlocked('Source calculation policy changed; create a new report version')
     if any(batch[k]!=v for k,v in expected.items()):
         # Validation can legitimately change for unrelated trucks when live DHL
         # records change. Mapping/assumption integrity must nevertheless match.
@@ -53,7 +55,7 @@ def validate_truck(conn,batch,row,context=None):
     expected, rebuilt, inspected, source = context or _context(conn,batch)
     date_codes={'source_dates_unreviewed','missing_source_date','invalid_source_date','out_of_period_date',
                 'invalid_source_identity','invalid_source_amount','source_gross_inconsistent','source_manifest_mismatch',
-                'duplicate_source_row','unsupported_source_charge'}
+                'duplicate_source_row','unsupported_source_charge','inclusive_amount_mismatch','source_marked_error','offloading_surcharge_review'}
     blockers=[i for i in expected['issues'] if i.get('blocking',True) and i['code'] not in date_codes]
     # Include all live selected-month records, including trucks outside the roster.
     from services.monthly_files import resolve_review

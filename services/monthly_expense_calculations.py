@@ -26,6 +26,7 @@ class RevenueEvidence:
     status: RevenueStatus
     gross: Decimal | None = None
     evidence: str = ''  # source snapshot reference or explicit no-activity verification
+    dhl_admin_fee: Decimal = Decimal('0.00')
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,10 @@ def calculate_monthly_expenses(row: ExpenseRow, month: date, revenue: RevenueEvi
         warnings.append('no_matching_transport_revenue_verified_zero')
     if gross == 0:
         warnings.append('zero_revenue')
-    base = gross - operating
+    admin=revenue.dhl_admin_fee
+    if not isinstance(admin,Decimal) or not admin.is_finite() or admin!=admin.quantize(CENT):
+        raise ValueError('DHL admin fee must be a finite Decimal in cents')
+    base = gross - admin - operating
     commission = (max(base, Decimal('0.00')) * Decimal('0.07')).quantize(CENT, rounding=ROUND_HALF_UP)
     net = base - commission
     if net < 0:

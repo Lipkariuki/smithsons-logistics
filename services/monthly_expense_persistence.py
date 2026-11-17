@@ -15,7 +15,7 @@ import unicodedata
 from sqlalchemy import select, insert, update, text, func
 
 from services.monthly_expense_models import imports, rows
-from services.monthly_expense_parser import parse_expenses, OPTIONAL_CATEGORY, money
+from services.monthly_expense_parser import parse_expenses, OPTIONAL_CATEGORY, money, normalize_header
 from services.monthly_expense_calculations import RevenueEvidence, RevenueStatus, calculate_monthly_expenses
 from services.monthly_expense_reconciliation import validate_reference_columns
 from services.monthly_expense_dates import validate_source
@@ -24,6 +24,19 @@ POLICY = {'version': 'monthly-expenses-v2', 'parser_version': 'flexible-xlsx-v2'
           'blank_expenses': 'zero_with_audit', 'absent_categories': 'zero_no_carry_forward',
           'currency': 'KES', 'rounding': 'ROUND_HALF_UP', 'scale': 2,
           'commission_rate': '0.07', 'positive_base_only': True}
+
+DHL_POLICY = dict(POLICY, version='monthly-expenses-v3-dist-admin', dhl_admin_rate='0.05',
+                  dhl_admin_base='DIST_including_surcharge_only', transport_policy='dist-surcharge-admin-v1')
+
+def supported_policy(policy):
+    return policy in (POLICY, DHL_POLICY)
+
+def policy_for_review(review, month):
+    from services.dhl_revenue_policy import inspect_transport
+    import base64
+    if review and review.get('source_content_base64') and inspect_transport(base64.b64decode(review['source_content_base64'],validate=True),month):
+        return DHL_POLICY
+    return POLICY
 
 
 class ValidationBlocked(ValueError):
@@ -87,6 +100,10 @@ def _build(conn, content, month, decisions, actor, audit_time):
     source_review = resolve_review(conn, decisions.get('historical_review'), month)
     # Archived evidence must support this truck before labelling its revenue
     # verified. Other trucks' unresolved rows still do not block this truck.
+    from services.dhl_revenue_policy import inspect_transport, truck_snapshot
+    import base64
+    transport=inspect_transport(base64.b64decode(source_review['source_content_base64'],validate=True),month) if source_review and source_review.get('source_content_base64') else None
+    policy=DHL_POLICY if transport else POLICY
     archived_review = bool((decisions.get('historical_review') or {}).get('archive_id'))
     # Read-only legacy identity lookup. No ORM relationships or payout services.
     vehicles = list(conn.execute(text('''SELECT v.id, v.plate_number, v.owner_id, v.size,
@@ -100,6 +117,8 @@ def _build(conn, content, month, decisions, actor, audit_time):
     payloads = []
     for row in preview.rows:
         issues = [asdict(i) for i in row.issues]
+        if transport and any(h.classification=='expense' and 'admin' in normalize_header(h.original_header) for h in preview.headers):
+            issues.append(dict(code='possible_admin_fee_overlap',message='An approved expense header mentions admin; review possible overlap with the separately calculated administration fee.',cell=None,blocking=True))
         matches = [dict(v) for v in vehicles if _plate(v['plate_number']) == row.plate]
         vehicle = matches[0] if len(matches) == 1 else {}
         if len(matches) != 1:
@@ -144,10 +163,19 @@ def _build(conn, content, month, decisions, actor, audit_time):
             audit[cell] = dict(value)
             if 'approved_correction' in value:
                 audit[cell].update(approved_by=actor, approved_at=audit_time, reason=decisions['reason'])
+        admin=Decimal('0.00')
+        if transport:
+            snapshot=truck_snapshot(transport,row.plate,month)
+            audit['_dhl_transport']=snapshot
+            admin=money(snapshot['admin_fee'])
+            issues += [dict(i) for i in transport['issues'] if i['truck']==row.plate]
+            if gross is not None and money(snapshot['gross'])!=gross:
+                issues.append(dict(code='source_gross_inconsistent',message='Inclusive source gross differs from persisted DHL records',cell=None,blocking=True))
+                gross=None;status=RevenueStatus.INCOMPLETE
         financial = {'gross': gross, 'operating_expenses': None, 'commission_base': None,
                      'commission': None, 'net_payable': None}
         if row.ready:
-            result = calculate_monthly_expenses(row, month, RevenueEvidence(row.plate, month, status, gross, evidence))
+            result = calculate_monthly_expenses(row, month, RevenueEvidence(row.plate, month, status, gross, evidence, admin))
             for key in financial:
                 financial[key] = getattr(result, key)
             issues += [{'code': warning, 'message': warning, 'cell': None, 'blocking': False} for warning in result.warnings]
@@ -169,7 +197,7 @@ def _build(conn, content, month, decisions, actor, audit_time):
                              'cell': None, 'blocking': True})
     assumptions = [dict(asdict(i), amount='0.00')
                    for i in preview.issues if i.code in {'optional_category_absent', 'category_absent_zero'}]
-    return dict(header_mappings=header_mappings, assumptions=assumptions, issues=batch_issues), payloads, fingerprint
+    return dict(header_mappings=header_mappings, assumptions=assumptions, issues=batch_issues, calculation_policy=policy), payloads, fingerprint
 
 
 def _column(number):
@@ -238,7 +266,7 @@ def create_draft(conn, content: bytes, month: date, filename: str, uploader_id: 
     import_id = conn.execute(insert(imports).values(reporting_month=month, version=version, status='draft',
         original_filename=filename, file_sha256=sha, source_content=content,
         decisions=decisions, decisions_sha256=decisions_sha, dhl_source_fingerprint=fingerprint,
-        source_verification=decisions['source_verification'], calculation_policy=POLICY,
+        source_verification=decisions['source_verification'],
         uploader_id=uploader_id, created_at=now, previous_version_id=previous_version_id, **batch)
         .returning(imports.c.id)).scalar_one()
     if payloads:
@@ -258,7 +286,7 @@ def preview_import(conn, content, month, actor_id, **options):
     batch, payloads, fingerprint = _build(conn, content, month, decisions, actor_id, now.isoformat())
     return dict(reporting_month=month, version=None, status='preview', decisions=decisions,
                 source_content=content, dhl_source_fingerprint=fingerprint, rows=payloads,
-                calculation_policy=POLICY, uploader_id=actor_id, created_at=now, **batch)
+                uploader_id=actor_id, created_at=now, **batch)
 
 
 def get_import(conn, import_id):
@@ -286,7 +314,7 @@ def confirm_import(conn, import_id, confirmer_id):
         raise VersionConflict('Draft month changed during confirmation')
     if batch['status'] != 'draft':
         raise VersionConflict('Only drafts can be confirmed')
-    if batch['calculation_policy'] != POLICY:
+    if not supported_policy(batch['calculation_policy']):
         raise ValidationBlocked('Unsupported calculation policy; create a new version')
     if hashlib.sha256(bytes(batch['source_content'])).hexdigest() != batch['file_sha256'] or _hash(batch['decisions']) != batch['decisions_sha256']:
         raise ValidationBlocked('Workbook or decision checksum changed')

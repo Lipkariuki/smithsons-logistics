@@ -40,6 +40,8 @@ def inspect_source(content: bytes, month: date):
         if len(candidates) != 1:
             raise ValueError('Raw report needs one DATE/TRUCK/REF NO/COST/AMOUNT header')
         first, names = candidates[0]
+        from services.dhl_revenue_policy import is_new_format, inspect_transport
+        new_format = is_new_format(names)
         issues, groups = [], {}
         for number in range(first + 1, ws.max_row + 1):
             values = {key: ws.cell(number, col).value for key, col in names.items()}
@@ -69,7 +71,7 @@ def inspect_source(content: bytes, month: date):
             label = str(values.get('cost') or '').strip().lower()
             # Same verified gross rule. Admin contributes zero; never an expense.
             if 'dist' in label or 'off' in label:
-                try: amount = money(values.get('amount'))
+                try: amount = money(values.get('amount inc surcharge') if new_format else values.get('amount'))
                 except ValueError:
                     issues.append({'source_row': number, 'date': day.isoformat(), 'truck': plate, 'reference': ref,
                                    'amount': str(values.get('amount')), 'code': 'invalid_source_amount',
@@ -145,7 +147,10 @@ def _charge_scan(content, month):
 
 
 def charge_issues(content, month, target_plate=None):
-    return [issue for plate, issue in _charge_scan(content, month)
+    from services.dhl_revenue_policy import inspect_transport
+    transport=inspect_transport(content,month)
+    financial=[i for i in transport['issues'] if i['blocking'] and (not target_plate or i['truck']==target_plate)] if transport else []
+    return financial + [issue for plate, issue in _charge_scan(content, month)
             if not target_plate or not plate or plate == target_plate]
 
 
@@ -161,7 +166,10 @@ def validate_source(review, dispositions, source, month, *, target_plate=None, _
     actual, expected = _inspected if _inspected is not None else inspect_source(content, month)
     if {k: v for k, v in review.items() if k != 'source_content_base64'} != actual:
         raise ValueError('Raw source review checksum or reporting month changed')
-    known = {str(r['source_row']): r for r in actual['date_issues']}
+    from services.dhl_revenue_policy import inspect_transport
+    transport=inspect_transport(content,month)
+    notes=set(transport['note_rows']) if transport else set()
+    known = {str(r['source_row']): r for r in actual['date_issues'] if r['source_row'] not in notes}
     if set(dispositions) - set(known):
         raise ValueError('Date decisions must identify affected rows in this exact raw workbook')
     result = charge_issues(content, month, target_plate)

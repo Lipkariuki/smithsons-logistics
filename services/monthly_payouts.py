@@ -66,6 +66,9 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
     replacing = content is not None
     same_raw = bool(raw and (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'])
     alias_review = bool(previous and same_raw and _alias_review_needed(previous, raw))
+    from services.monthly_expense_persistence import policy_for_review
+    source_policy=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month) if raw else None
+    policy_upgrade=bool(previous and raw and previous['calculation_policy']!=source_policy)
     options = dict(
         approved_mappings=mappings if mappings is not None else old.get('approved_mappings', {}),
         # A replacement workbook is the whole expense source; never carry old
@@ -79,8 +82,9 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
                 + ('; ' + ALIAS_REVIEW if alias_review else '')),
         previous_version_id=previous['id'] if previous else None,
     )
+    if policy_upgrade:options['reason']+='; New source format calculation policy; prior snapshots preserved'
     import hashlib
-    if previous and raw and old.get('source_verification') and same_raw and not old.get('corrections') and not alias_review:
+    if previous and raw and old.get('source_verification') and same_raw and not old.get('corrections') and not alias_review and not policy_upgrade:
         _, fingerprint = _sources(conn, month)
         incoming = content if replacing else bytes(previous['source_content'])
         if (hashlib.sha256(incoming).hexdigest() == previous['file_sha256']
@@ -111,7 +115,9 @@ def state(conn, month):
     if batch and raw and batch['status'] == 'draft':
         _, fingerprint = _sources(conn, month)
         old = batch['decisions']
-        if not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw):
+        from services.monthly_expense_persistence import policy_for_review
+        policy_upgrade=batch['calculation_policy']!=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month)
+        if policy_upgrade or not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw):
             # GET is strictly read-only. Old drafts can display an automatic
             # preview; only a user upload/review/issue action appends a draft.
             batch = preview_import(conn, bytes(batch['source_content']), month, batch['uploader_id'],

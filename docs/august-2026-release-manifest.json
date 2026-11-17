@@ -1,0 +1,34 @@
+{
+  "backend_base": "c0f383d9539c99b4b3db2e41cc5d8661d71b4f13",
+  "frontend_base": "2dd74ac850a9ff4ed882d1ccf34a4e2625e1b02b",
+  "backend_files": [
+    "routers/monthly_payouts.py",
+    "services/dhl_import.py",
+    "services/monthly_expense_calculations.py",
+    "services/monthly_expense_dates.py",
+    "services/monthly_expense_parser.py",
+    "services/monthly_expense_persistence.py",
+    "services/monthly_expense_reports.py",
+    "services/monthly_files.py",
+    "services/monthly_payouts.py",
+    "services/monthly_statement_documents.py",
+    "services/truck_confirmations.py",
+    "services/dhl_revenue_policy.py",
+    "migrations/006_dist_surcharge_admin_policy.sql",
+    "scripts/migrate_dist_admin_policy.py",
+    "tests/test_august_dist_admin.py",
+    "docs/august-2026-release-plan.md",
+    "docs/august-2026-release-manifest.json"
+  ],
+  "frontend_files": [
+    "src/pages/reports/DhlMonthlyPayouts.jsx",
+    "tests/monthlyExpenses.browser.test.mjs"
+  ],
+  "production_execution_gates": [
+    "fresh_backup_and_restore_verified",
+    "exact_target_and_current_migration_state_verified",
+    "migration_006_before_backend_if_pending",
+    "backend_live_and_readonly_checks_before_frontend"
+  ],
+  "business_records_unresolved": true
+}

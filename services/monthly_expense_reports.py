@@ -50,6 +50,9 @@ def report_view(batch, versions=(), *, owner_id=None, vehicle_id=None):
                 (owner_id is None or r['vehicle_owner_snapshot'].get('owner_id') == owner_id)
                 and (vehicle_id is None or r['vehicle_id'] == vehicle_id)]
     for row in selected:
+        transport=row.get('cell_audit',{}).get('_dhl_transport')
+        if transport:
+            row['dhl_admin_fee']=Decimal(transport['admin_fee']) if row['gross'] is not None else None
         row['comparisons'] = references[row['source_row']]
     detail.update(rows=selected, versions=list(versions), totals=totals(selected),
                   full_report_totals=totals(batch['rows']),
@@ -134,6 +137,8 @@ def export_xlsx(view):
         for key, expense in row['deductions'].items():
             categories.setdefault(key, expense['label'])
     headers = ['Truck', 'Owner', LABELS[0], *categories.values(), *LABELS[1:]]
+    with_admin=any('dhl_admin_fee' in r for r in view['rows'])
+    if with_admin:headers.insert(3,'Administration Fee (DIST only)')
     difference_columns = set()
     for key in tuple(REFERENCE_LABELS):
         label = REFERENCE_LABELS[key]
@@ -150,14 +155,19 @@ def export_xlsx(view):
             comparison = row['comparisons'][key]
             data += [_number(comparison.get('manual')), _number(comparison.get('difference')),
                      _excel_text(comparison['status'].replace('_', ' ').capitalize())]
+        if with_admin:data.insert(3,_number(row.get('dhl_admin_fee')))
         ws.append(data)
     # Do not silently treat missing row/category amounts as zero.
     category_totals = []
     for key in categories:
         values = [r['deductions'].get(key, {}).get('amount') for r in view['rows']]
         category_totals.append(None if any(v is None for v in values) else sum((_number(v) for v in values), Decimal('0.00')))
-    ws.append(['MONTHLY TOTAL', None, _number(view['totals']['gross']['amount']), *category_totals,
-               *[_number(view['totals'][key]['amount']) for key in FINANCIAL[1:]]])
+    monthly_total=['MONTHLY TOTAL', None, _number(view['totals']['gross']['amount']), *category_totals,
+               *[_number(view['totals'][key]['amount']) for key in FINANCIAL[1:]]]
+    if with_admin:
+        fees=[r.get('dhl_admin_fee') for r in view['rows']]
+        monthly_total.insert(3,None if any(f is None for f in fees) else sum((_number(f) for f in fees),Decimal('0.00')))
+    ws.append(monthly_total)
     total_row = ws.max_row
     ws.append(['Commission is calculated separately for each truck, then totalled.'])
     ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=len(headers))
@@ -256,6 +266,7 @@ def export_pdf(view):
         line(f"Owner: {row['vehicle_owner_snapshot'].get('owner_name') or 'Unassigned'}")
         line(f"Month: {view['reporting_month'][:7]} | Version: {view['version']} | Status: {view['status']}")
         amount(LABELS[0], row['gross'])
+        if 'dhl_admin_fee' in row:amount('Administration Fee (DIST only)',row['dhl_admin_fee'])
         line('Itemized Operating Expenses', True)
         for value in row['deductions'].values():
             amount(value['label'], value['amount'])

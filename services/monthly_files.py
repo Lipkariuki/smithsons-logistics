@@ -99,10 +99,14 @@ def verification(conn,record):
  def totals(groups):
   dist=sum((r[0] for r in groups.values()),Decimal('0.00'));off=sum((r[1] for r in groups.values()),Decimal('0.00'))
   return dict(distribution=format(dist,'.2f'),offloading=format(off,'.2f'),gross=format(dist+off,'.2f'))
- return dict(matches=not issues,status='matched_pending_administrator_review' if not issues else 'needs_review',
+ from services.dhl_revenue_policy import inspect_transport
+ transport=inspect_transport(bytes(record['content']),month)
+ warnings=[i for i in transport['issues'] if not i['blocking']] if transport else []
+ return dict(transport_policy=transport['policy'] if transport else None,warnings=warnings,matches=not issues,status='matched_pending_administrator_review' if not issues else 'needs_review',
   source_fingerprint=fingerprint,saved_record_count=len(source),workbook_group_count=len(expected),
   workbook_totals=totals(expected),saved_totals=totals(observed),differences=differences,
-  date_issues=actual['date_issues'],issues=issues,
+  date_issues=[i for i in actual['date_issues'] if not transport or i['source_row'] not in transport['note_rows']],issues=issues,
+  source_annotation_rows=transport['note_rows'] if transport else [],
   message='Evidence only. No DHL records, payslips or financial approvals were changed. Review and save a new expense report version using the retained workbook.')
 
 
