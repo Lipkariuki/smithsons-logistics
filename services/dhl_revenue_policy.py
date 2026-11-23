@@ -25,6 +25,7 @@ def is_new_format(names):
 def inspect_transport(content, month):
     validate_xlsx_envelope(content)
     wb=load_workbook(io.BytesIO(content),data_only=True)
+    formulas=load_workbook(io.BytesIO(content),data_only=False)
     try:
         ws=wb.active
         for n in range(1,min(30,ws.max_row)+1):
@@ -56,9 +57,18 @@ def inspect_transport(content, month):
             item={'source_row':number,'date':day.isoformat(),'plate':plate,'reference':ref,'cost':'dist' if label=='dist' else 'offloading'}
             def issue(code,message,blocking=True):
                 result['issues'].append(dict(code=code,message=f'Excel row {number}: {message}',cell=f'P{number}',blocking=blocking,truck=plate,source_row=number))
-            try:amount,surcharge,inclusive=(money(v[k]) for k in ('amount','surcharge','amount inc surcharge'))
+            # Offloading attracts no surcharge. Only a genuinely empty source
+            # cell may mean zero; an uncached formula is not an empty cell.
+            blank_offloading_surcharge=(item['cost']=='offloading' and v['surcharge'] is None
+                and formulas.active.cell(number,names['surcharge']).value is None)
+            try:
+                amount=money(v['amount']);inclusive=money(v['amount inc surcharge'])
+                surcharge=Decimal('0.00') if blank_offloading_surcharge and amount==inclusive else money(v['surcharge'])
             except ValueError:
-                issue('invalid_source_amount','DIST, surcharge and inclusive amount must be numeric; correct the source.');continue
+                issue('invalid_source_amount','AMOUNT, SURCHARGE and AMOUNT INC SURCHARGE must be numeric. A blank Offloading surcharge is allowed only when AMOUNT equals AMOUNT INC SURCHARGE.');continue
+            if blank_offloading_surcharge:
+                item['interpretations']=[dict(cell=f"{ws.cell(number,names['surcharge']).column_letter}{number}",
+                    original_value=None,interpretation='offloading_blank_surcharge_zero',amount='0.00')]
             if amount+surcharge!=inclusive:
                 issue('inclusive_amount_mismatch',f'AMOUNT {amount:.2f} + SURCHARGE {surcharge:.2f} differs from inclusive amount {inclusive:.2f}; no adjustment was made.')
             if item['cost']=='offloading' and surcharge!=0:
@@ -74,7 +84,9 @@ def inspect_transport(content, month):
             if flagged:issue('source_marked_error','Transaction follows TRIP ADDED IN ERROR; neither excluded nor approved.')
             result['transactions'].append(item)
         return result
-    finally:wb.close()
+    finally:
+        wb.close()
+        formulas.close()
 
 
 def truck_snapshot(inspection, plate, month):

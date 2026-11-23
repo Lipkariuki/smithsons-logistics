@@ -27,7 +27,7 @@ def normalize_header(value: str) -> str:
 
 
 KNOWN = {
-    'fuel': ('Fuel', ('fuel', 'fuel cost')),
+    'fuel': ('Fuel', ('fuel', 'fuel cost', 'shell fuel')),
     'kasarani_ksm_fuel': ('Kasarani & KSM Fuel', ('kasarani & ksm fuel', 'kasarani and ksm fuel', 'kasarani ksm fuel')),
     'breakages': ('Breakages', ('breakages', 'breakage')),
     'telematics_vss': ('Telematics & VSS', ('telematics & vss', 'telematics and vss', 'telematics vss')),
