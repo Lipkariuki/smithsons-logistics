@@ -15,6 +15,31 @@ SYSTEM_REVIEW = ('System checked the retained workbook against selected-month DH
                  'this is not a human approval or a no-activity attestation.')
 
 ALIAS_REVIEW = 'Known COST aliases revalidated; Offload and Offloading represent the same transport charge.'
+PARSER_REVIEW = ('Saved workbooks revalidated for known expense headers and blank Offloading surcharges; '
+                 'prior financial snapshots preserved.')
+
+
+def _parser_review_needed(batch, raw):
+    """Detect rejected snapshots whose inputs now have a supported interpretation.
+
+    This does not clear other validation issues or approve a truck. GET only
+    previews; synchronize appends a new version with an explicit audit reason.
+    """
+    if not raw:
+        return False
+    from services.monthly_expense_parser import ALIASES, normalize_header
+    if any(h['classification']=='unknown' and normalize_header(h['original_header']) in ALIASES
+           for h in batch['header_mappings']):
+        return True
+    old = {(i.get('source_row'), i.get('truck')) for i in batch['issues']
+           if i['code']=='invalid_source_amount'}
+    if not old:
+        return False
+    from services.monthly_expense_dates import charge_issues
+    current = {(i.get('source_row'), i.get('truck'))
+               for i in charge_issues(bytes(raw['content']), batch['reporting_month'])
+               if i['code']=='invalid_source_amount'}
+    return bool(old - current)
 
 
 def _alias_review_needed(batch, raw):
@@ -66,6 +91,7 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
     replacing = content is not None
     same_raw = bool(raw and (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'])
     alias_review = bool(previous and same_raw and _alias_review_needed(previous, raw))
+    parser_review = bool(previous and same_raw and _parser_review_needed(previous, raw))
     from services.monthly_expense_persistence import policy_for_review
     source_policy=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month) if raw else None
     policy_upgrade=bool(previous and raw and previous['calculation_policy']!=source_policy)
@@ -83,8 +109,9 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
         previous_version_id=previous['id'] if previous else None,
     )
     if policy_upgrade:options['reason']+='; New source format calculation policy; prior snapshots preserved'
+    if parser_review:options['reason']+='; '+PARSER_REVIEW
     import hashlib
-    if previous and raw and old.get('source_verification') and same_raw and not old.get('corrections') and not alias_review and not policy_upgrade:
+    if previous and raw and old.get('source_verification') and same_raw and not old.get('corrections') and not alias_review and not parser_review and not policy_upgrade:
         _, fingerprint = _sources(conn, month)
         incoming = content if replacing else bytes(previous['source_content'])
         if (hashlib.sha256(incoming).hexdigest() == previous['file_sha256']
@@ -117,7 +144,7 @@ def state(conn, month):
         old = batch['decisions']
         from services.monthly_expense_persistence import policy_for_review
         policy_upgrade=batch['calculation_policy']!=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month)
-        if policy_upgrade or not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw):
+        if policy_upgrade or not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw) or _parser_review_needed(batch, raw):
             # GET is strictly read-only. Old drafts can display an automatic
             # preview; only a user upload/review/issue action appends a draft.
             batch = preview_import(conn, bytes(batch['source_content']), month, batch['uploader_id'],

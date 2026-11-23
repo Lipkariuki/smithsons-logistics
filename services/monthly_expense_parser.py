@@ -34,7 +34,15 @@ KNOWN = {
     'gprs': ('GPRS', ('gprs',)),
     'shunting': ('Shunting', ('shunting',)),
 }
-ALIASES = {normalize_header(alias): key for key, (_, aliases) in KNOWN.items() for alias in aliases}
+# Business-approved additional categories do not change the historical six
+# absent-category assumptions. Preserve any earlier explicit mapping/ignore.
+BUSINESS_APPROVED = {
+    'fidelity_charges': ('Fidelity Charges', ('fidelity charges',)),
+    'reflective_vests': ('Reflective Vests', ('reflective vests',)),
+}
+CATEGORIES = {**KNOWN, **BUSINESS_APPROVED}
+ALIASES = {normalize_header(alias): key for key, (_, aliases) in CATEGORIES.items() for alias in aliases}
+BUSINESS_ALIASES = {normalize_header(alias) for _, aliases in BUSINESS_APPROVED.values() for alias in aliases}
 TRUCK_HEADERS = {normalize_header(s) for s in ('TRUCK REG/NO', 'TRUCK REG.NO', 'TRUCK REGISTRATION', 'TRUCK REG NO')}
 IGNORED = {normalize_header(s) for s in ('OPERATING EXPENSES', 'TOTAL OPERATING EXPENSES', 'TOTAL EXPENSES', 'GROSS AMOUNT', 'NET PAID I', 'NET PAID 1', 'NET PAID 2', 'NET PAID', 'NET PAY', '7% COMMISSION', '7 COMMISSION')}
 
@@ -161,7 +169,7 @@ def parse_expenses(
             norm = normalize_header(original)
             if norm in mappings:
                 raise ValueError('Duplicate normalized mapping header')
-            if norm in IGNORED or norm in TRUCK_HEADERS or norm in ALIASES:
+            if norm in IGNORED or norm in TRUCK_HEADERS or (norm in ALIASES and norm not in BUSINESS_ALIASES):
                 raise ValueError('Built-in header classifications cannot be overridden')
             mappings[norm] = label
         headers: list[HeaderMapping] = []
@@ -191,10 +199,10 @@ def parse_expenses(
                 classification = 'truck'
             elif norm in IGNORED:
                 classification = 'ignored'
-            elif norm in ALIASES:
+            elif norm in ALIASES and not (norm in BUSINESS_ALIASES and norm in mappings):
                 classification = 'expense'
                 category = ALIASES[norm]
-                label = KNOWN[category][0]
+                label = CATEGORIES[category][0]
             elif norm in mappings:
                 source = 'administrator'
                 label = mappings[norm]
