@@ -10,6 +10,7 @@ from services.monthly_expense_parser import money, normalize_header, validate_xl
 from services.monthly_reporting_scope import request_read
 
 POLICY = 'dist-surcharge-admin-v1'
+COMPONENT_POLICY = 'dist-components-cent-v1'
 HEADERS = {'surcharge', 'amount inc surcharge', '5 admin fee', 'net dist cost'}
 CENT = Decimal('.01')
 
@@ -92,26 +93,62 @@ def inspect_transport(content, month):
 def truck_snapshot(inspection, plate, month):
     transactions=[dict(t) for t in inspection['transactions'] if t['plate']==plate]
     total=lambda field,kind=None:sum((Decimal(t[field]) for t in transactions if kind is None or t['cost']==kind),Decimal('0.00'))
-    return dict(policy=POLICY,reporting_month=month.isoformat(),transactions=transactions,
+    return dict(policy=inspection['policy'],reporting_month=month.isoformat(),transactions=transactions,
                 distribution=format(total('amount','dist'),'.2f'),offloading=format(total('amount','offloading'),'.2f'),
                 surcharge=format(total('surcharge'),'.2f'),gross=format(total('inclusive'),'.2f'),admin_fee=format(total('admin_fee'),'.2f'))
+
+
+@request_read
+def payout_transport(content, month, *, accept_cent_differences=False):
+    """Explicit new-version policy; the original importer/inspection stays strict."""
+    import copy
+    scan=inspect_transport(content,month)
+    if not scan or not accept_cent_differences:return scan
+    scan=copy.deepcopy(scan);scan['policy']=COMPONENT_POLICY
+    accepted=set();fee_changed=set()
+    for t in scan['transactions']:
+        original=money(t['inclusive']);calculated=money(t['amount'])+money(t['surcharge'])
+        delta=calculated-original
+        t['source_inclusive']=format(original,'.2f');t['source_adjustment']='0.00'
+        if t['cost']=='dist' and abs(delta)==CENT:
+            previous_fee=t['admin_fee']
+            t['inclusive']=format(calculated,'.2f');t['source_adjustment']=format(delta,'.2f')
+            t['admin_fee']=format((calculated*Decimal('.05')).quantize(CENT,rounding=ROUND_HALF_UP),'.2f')
+            if t['admin_fee']!=previous_fee:
+                t['previous_calculated_admin_fee']=previous_fee;fee_changed.add(t['source_row'])
+            accepted.add(t['source_row'])
+    # An old comparison against the pre-adjustment fee would be misleading.
+    # Keep the source workbook unchanged and explicitly display the new fee.
+    scan['issues']=[i for i in scan['issues'] if not (i['code']=='admin_fee_reference_mismatch' and i['source_row'] in fee_changed)]
+    for issue in scan['issues']:
+        if issue['code']=='inclusive_amount_mismatch' and issue['source_row'] in accepted:
+            t=next(t for t in scan['transactions'] if t['source_row']==issue['source_row'])
+            issue.update(code='source_cent_difference_calculated',blocking=False,
+                message=f"Excel row {t['source_row']}: workbook inclusive {t['source_inclusive']}; calculated AMOUNT + SURCHARGE {t['inclusive']}; difference {t['source_adjustment']}; calculated administration fee {t['admin_fee']}. Original retained under approved one-cent policy.")
+    return scan
 
 
 def snapshot_fee(row):
     """Validate frozen source arithmetic before displaying or rendering it."""
     snapshot=row.get('cell_audit',{}).get('_dhl_transport')
     if snapshot is None:return Decimal('0.00')
-    if snapshot.get('policy')!=POLICY:raise ValueError('Unsupported transport snapshot policy')
+    if snapshot.get('policy') not in {POLICY,COMPONENT_POLICY}:raise ValueError('Unsupported transport snapshot policy')
     amounts={k:money(snapshot[k]) for k in ('distribution','offloading','surcharge','gross','admin_fee')}
     if amounts['distribution']+amounts['offloading']+amounts['surcharge']!=amounts['gross']:
         raise ValueError('Transport components disagree; review source')
-    dist=off=sur=fee=Decimal('0.00');seen=set()
+    dist=off=sur=fee=original_dist=original_off=Decimal('0.00');seen=set()
     for t in snapshot['transactions']:
         identity=t['source_row']
         if identity in seen:raise ValueError('Duplicate frozen transport row')
         seen.add(identity)
         if t['plate']!=row['normalized_plate'] or t['date'][:7]!=snapshot['reporting_month'][:7]:raise ValueError('Frozen source identity mismatch')
         a,s,i,f=(money(t[k]) for k in ('amount','surcharge','inclusive','admin_fee'))
+        if snapshot['policy']==COMPONENT_POLICY:
+            original=money(t['source_inclusive']);delta=money(t['source_adjustment'])
+            if i-original!=delta or abs(delta)>CENT or (t['cost']!='dist' and delta!=0):
+                raise ValueError('Invalid approved source cent adjustment')
+            if t['cost']=='dist':original_dist+=original
+            elif t['cost']=='offloading':original_off+=original
         if a+s!=i:raise ValueError('Frozen inclusive amount mismatch')
         if t['cost']=='dist':
             if f!=(i*Decimal('.05')).quantize(CENT,rounding=ROUND_HALF_UP):raise ValueError('Frozen DIST admin fee mismatch')
@@ -123,4 +160,8 @@ def snapshot_fee(row):
         sur+=s;fee+=f
     if (dist,off,sur,fee)!=(amounts['distribution'],amounts['offloading'],amounts['surcharge'],amounts['admin_fee']):raise ValueError('Frozen transport totals mismatch')
     if amounts['gross']!=row['gross']:raise ValueError('Frozen gross mismatch')
+    if snapshot['policy']==COMPONENT_POLICY:
+        ledger=row['dhl_source_snapshot']
+        if original_dist!=sum((money(r['distribution_cost']) for r in ledger),Decimal('0.00')) or original_off!=sum((money(r['offloading_cost']) for r in ledger),Decimal('0.00')):
+            raise ValueError('Original workbook and saved revenue snapshot disagree')
     return fee

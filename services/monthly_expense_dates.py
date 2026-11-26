@@ -146,15 +146,15 @@ def _charge_scan(content, month):
         wb.close()
 
 
-def charge_issues(content, month, target_plate=None):
-    from services.dhl_revenue_policy import inspect_transport
-    transport=inspect_transport(content,month)
+def charge_issues(content, month, target_plate=None, *, accept_cent_differences=False):
+    from services.dhl_revenue_policy import payout_transport
+    transport=payout_transport(content,month,accept_cent_differences=accept_cent_differences)
     financial=[i for i in transport['issues'] if i['blocking'] and (not target_plate or i['truck']==target_plate)] if transport else []
     return financial + [issue for plate, issue in _charge_scan(content, month)
             if not target_plate or not plate or plate == target_plate]
 
 
-def validate_source(review, dispositions, source, month, *, target_plate=None, _inspected=None):
+def validate_source(review, dispositions, source, month, *, target_plate=None, _inspected=None, accept_cent_differences=False):
     """Reparse retained bytes every build/confirmation; flags cannot supply results."""
     def issue(code, message): return {'code': code, 'message': message, 'cell': None, 'blocking': True}
     if not review or not review.get('source_content_base64'):
@@ -172,7 +172,7 @@ def validate_source(review, dispositions, source, month, *, target_plate=None, _
     known = {str(r['source_row']): r for r in actual['date_issues'] if r['source_row'] not in notes}
     if set(dispositions) - set(known):
         raise ValueError('Date decisions must identify affected rows in this exact raw workbook')
-    result = charge_issues(content, month, target_plate)
+    result = charge_issues(content, month, target_plate,accept_cent_differences=accept_cent_differences)
     for key, row in known.items():
         decision = dispositions.get(key)
         # Only out-of-period dates can be excluded through this narrow workflow.

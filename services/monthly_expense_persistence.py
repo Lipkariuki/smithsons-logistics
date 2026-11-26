@@ -27,15 +27,17 @@ POLICY = {'version': 'monthly-expenses-v2', 'parser_version': 'flexible-xlsx-v2'
 
 DHL_POLICY = dict(POLICY, version='monthly-expenses-v3-dist-admin', dhl_admin_rate='0.05',
                   dhl_admin_base='DIST_including_surcharge_only', transport_policy='dist-surcharge-admin-v1')
+COMPONENT_POLICY = dict(DHL_POLICY,version='monthly-expenses-v4-components-cent',
+    transport_policy='dist-components-cent-v1',source_cent_policy='amount_plus_surcharge_max_0.01_dist_only')
 
 def supported_policy(policy):
-    return policy in (POLICY, DHL_POLICY)
+    return policy in (POLICY, DHL_POLICY, COMPONENT_POLICY)
 
-def policy_for_review(review, month):
+def policy_for_review(review, month, *, accept_cent_differences=False):
     from services.dhl_revenue_policy import inspect_transport
     import base64
     if review and review.get('source_content_base64') and inspect_transport(base64.b64decode(review['source_content_base64'],validate=True),month):
-        return DHL_POLICY
+        return COMPONENT_POLICY if accept_cent_differences else DHL_POLICY
     return POLICY
 
 
@@ -100,10 +102,11 @@ def _build(conn, content, month, decisions, actor, audit_time):
     source_review = resolve_review(conn, decisions.get('historical_review'), month)
     # Archived evidence must support this truck before labelling its revenue
     # verified. Other trucks' unresolved rows still do not block this truck.
-    from services.dhl_revenue_policy import inspect_transport, truck_snapshot
+    from services.dhl_revenue_policy import payout_transport, truck_snapshot
     import base64
-    transport=inspect_transport(base64.b64decode(source_review['source_content_base64'],validate=True),month) if source_review and source_review.get('source_content_base64') else None
-    policy=DHL_POLICY if transport else POLICY
+    accept_cent=decisions.get('accept_cent_differences',False)
+    transport=payout_transport(base64.b64decode(source_review['source_content_base64'],validate=True),month,accept_cent_differences=accept_cent) if source_review and source_review.get('source_content_base64') else None
+    policy=(COMPONENT_POLICY if accept_cent else DHL_POLICY) if transport else POLICY
     archived_review = bool((decisions.get('historical_review') or {}).get('archive_id'))
     # Read-only legacy identity lookup. No ORM relationships or payout services.
     vehicles = list(conn.execute(text('''SELECT v.id, v.plate_number, v.owner_id, v.size,
@@ -127,7 +130,7 @@ def _build(conn, content, month, decisions, actor, audit_time):
         records = [item for item in source if _plate(item['truck_plate']) == row.plate]
         reason = proofs.get(row.plate, '')
         verification = decisions['source_verification']
-        if archived_review and validate_source(source_review, decisions.get('date_dispositions', {}), source, month, target_plate=row.plate):
+        if archived_review and validate_source(source_review, decisions.get('date_dispositions', {}), source, month, target_plate=row.plate,accept_cent_differences=accept_cent):
             verification = ''
         if reason and records:
             issues.append({'code': 'no_activity_conflict', 'message': 'DHL records exist for a no-activity claim',
@@ -169,9 +172,12 @@ def _build(conn, content, month, decisions, actor, audit_time):
             audit['_dhl_transport']=snapshot
             admin=money(snapshot['admin_fee'])
             issues += [dict(i) for i in transport['issues'] if i['truck']==row.plate]
-            if gross is not None and money(snapshot['gross'])!=gross:
+            original_gross=sum((money(t.get('source_inclusive',t['inclusive'])) for t in snapshot['transactions']),Decimal('0.00'))
+            if gross is not None and original_gross!=gross:
                 issues.append(dict(code='source_gross_inconsistent',message='Inclusive source gross differs from persisted DHL records',cell=None,blocking=True))
                 gross=None;status=RevenueStatus.INCOMPLETE
+            elif gross is not None:
+                gross=money(snapshot['gross'])
         financial = {'gross': gross, 'operating_expenses': None, 'commission_base': None,
                      'commission': None, 'net_payable': None}
         if row.ready:
@@ -191,7 +197,7 @@ def _build(conn, content, month, decisions, actor, audit_time):
                              deductions=deductions, cell_audit=audit, dhl_source_snapshot=records,
                              revenue_status=status.value, revenue_evidence=evidence, issues=issues, **financial))
     batch_issues = [asdict(i) for i in preview.issues]
-    batch_issues += validate_source(source_review, decisions.get('date_dispositions', {}), source, month)
+    batch_issues += validate_source(source_review, decisions.get('date_dispositions', {}), source, month,accept_cent_differences=accept_cent)
     if not decisions['source_verification']:
         batch_issues.append({'code': 'source_unverified', 'message': 'Month completeness verification required',
                              'cell': None, 'blocking': True})
@@ -210,7 +216,7 @@ def _column(number):
 
 def _prepare_decisions(approved_mappings=None, corrections=None, verified_no_activity=None,
                        source_verification='', reason='', sheet_name=None,
-                       reference_columns=None, reference_verification='', historical_review=None, date_dispositions=None):
+                       reference_columns=None, reference_verification='', historical_review=None, date_dispositions=None,accept_cent_differences=False):
     proofs = {}
     for plate, evidence in (verified_no_activity or {}).items():
         key = _plate(plate)
@@ -229,13 +235,17 @@ def _prepare_decisions(approved_mappings=None, corrections=None, verified_no_act
         decisions['historical_review'] = historical_review
     if date_dispositions:
         decisions['date_dispositions'] = date_dispositions
+    if type(accept_cent_differences) is not bool:raise ValueError('Explicit boolean cent policy required')
+    if accept_cent_differences:
+        if not reason.strip():raise ValueError('Cent policy requires an audit reason')
+        decisions['accept_cent_differences']=True
     return decisions
 
 
 def create_draft(conn, content: bytes, month: date, filename: str, uploader_id: int, *,
                  approved_mappings=None, corrections=None, verified_no_activity=None,
                  source_verification='', reason='', previous_version_id=None, sheet_name=None,
-                 reference_columns=None, reference_verification='', historical_review=None, date_dispositions=None):
+                 reference_columns=None, reference_verification='', historical_review=None, date_dispositions=None,accept_cent_differences=False):
     if month.day != 1 or uploader_id <= 0:
         raise ValueError('Explicit month and valid uploader required')
     if (approved_mappings or corrections or previous_version_id is not None) and not reason.strip():
@@ -252,7 +262,7 @@ def create_draft(conn, content: bytes, month: date, filename: str, uploader_id: 
         if predecessor is None or predecessor['reporting_month'] != month:
             raise ValueError('Previous version must belong to this month')
     decisions = _prepare_decisions(approved_mappings, corrections, verified_no_activity,
-        source_verification, reason, sheet_name, reference_columns, reference_verification, historical_review, date_dispositions)
+        source_verification, reason, sheet_name, reference_columns, reference_verification, historical_review, date_dispositions,accept_cent_differences)
     now = datetime.now(timezone.utc)
     batch, payloads, fingerprint = _build(conn, content, month, decisions, uploader_id, now.isoformat())
     decisions_sha = _hash(decisions)

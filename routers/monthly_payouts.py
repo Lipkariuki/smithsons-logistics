@@ -1,7 +1,7 @@
 """Admin-only autosave facade over the existing immutable monthly services."""
 from datetime import date
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, StrictBool
 from routers.monthly_expense_reports import _run, _upload, _view
 from services import monthly_payouts as payouts
 from services.monthly_expense_reports import decimal_json, totals
@@ -14,6 +14,7 @@ class SyncRequest(BaseModel):
     expected_raw_id: int | None = Field(None, gt=0)
     mappings: dict[str, StrictStr | None] | None = None
     no_activity: dict[str, StrictStr] | None = None
+    accept_cent_differences: StrictBool | None = None
 
 
 def create_router(connection_dependency, admin_dependency):

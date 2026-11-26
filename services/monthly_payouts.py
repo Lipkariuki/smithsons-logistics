@@ -72,7 +72,7 @@ def raw_latest(conn, month):
 
 
 def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
-                content=None, filename=None, mappings=None, no_activity=None):
+                content=None, filename=None, mappings=None, no_activity=None,accept_cent_differences=None):
     """Idempotent autosave; never mutate a previous snapshot or issue a PDF.
 
     The system review describes mechanical validation, not an administrator's
@@ -88,12 +88,22 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
     if content is None and previous is None:
         return None
     old = previous['decisions'] if previous else {}
+    if accept_cent_differences is not None and type(accept_cent_differences) is not bool:
+        raise ValueError('Explicit boolean cent-policy choice required')
     replacing = content is not None
     same_raw = bool(raw and (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'])
+    accept_cent=old.get('accept_cent_differences',False) if accept_cent_differences is None and same_raw else bool(accept_cent_differences)
+    if accept_cent and not conn.execute(text("SELECT to_regprocedure('dhl_component_cent_admin_fee(dhl_monthly_expense_rows,jsonb)') IS NOT NULL")).scalar_one():
+        raise VersionConflict('One-cent calculation policy requires migration 007 before it can be saved.')
+    if accept_cent:
+        from services.dhl_revenue_policy import payout_transport
+        candidate=payout_transport(bytes(raw['content']),month,accept_cent_differences=True) if raw else None
+        if not candidate or not any(i['code']=='source_cent_difference_calculated' for i in candidate['issues']):
+            raise ValueError('No eligible one-cent DIST differences were found in the saved workbook.')
     alias_review = bool(previous and same_raw and _alias_review_needed(previous, raw))
     parser_review = bool(previous and same_raw and _parser_review_needed(previous, raw))
     from services.monthly_expense_persistence import policy_for_review
-    source_policy=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month) if raw else None
+    source_policy=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month,accept_cent_differences=accept_cent) if raw else None
     policy_upgrade=bool(previous and raw and previous['calculation_policy']!=source_policy)
     options = dict(
         approved_mappings=mappings if mappings is not None else old.get('approved_mappings', {}),
@@ -107,9 +117,11 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
         reason=('Saved workbook calculations; pending individual administrator confirmation'
                 + ('; ' + ALIAS_REVIEW if alias_review else '')),
         previous_version_id=previous['id'] if previous else None,
+        accept_cent_differences=accept_cent,
     )
     if policy_upgrade:options['reason']+='; New source format calculation policy; prior snapshots preserved'
     if parser_review:options['reason']+='; '+PARSER_REVIEW
+    if accept_cent:options['reason']+='; Administrator selected calculated AMOUNT plus SURCHARGE for DIST differences of at most KES 0.01; original source retained'
     import hashlib
     if previous and raw and old.get('source_verification') and same_raw and not old.get('corrections') and not alias_review and not parser_review and not policy_upgrade:
         _, fingerprint = _sources(conn, month)
@@ -117,6 +129,7 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
         if (hashlib.sha256(incoming).hexdigest() == previous['file_sha256']
             and fingerprint == previous['dhl_source_fingerprint']
             and options['approved_mappings'] == old.get('approved_mappings', {})
+            and accept_cent==old.get('accept_cent_differences',False)
             and options['verified_no_activity'] == old.get('verified_no_activity', {})):
             return previous
     # Do not manufacture a new version on refresh if the same workbook,
@@ -143,7 +156,7 @@ def state(conn, month):
         _, fingerprint = _sources(conn, month)
         old = batch['decisions']
         from services.monthly_expense_persistence import policy_for_review
-        policy_upgrade=batch['calculation_policy']!=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month)
+        policy_upgrade=batch['calculation_policy']!=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month,accept_cent_differences=old.get('accept_cent_differences',False))
         if policy_upgrade or not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw) or _parser_review_needed(batch, raw):
             # GET is strictly read-only. Old drafts can display an automatic
             # preview; only a user upload/review/issue action appends a draft.
@@ -152,7 +165,22 @@ def state(conn, month):
                 source_verification=SYSTEM_REVIEW, historical_review=files.reference(raw),
                 verified_no_activity=old.get('verified_no_activity', {}) if (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'] else {},
                 date_dispositions=old.get('date_dispositions', {}) if (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'] else {},
-                reason='Read-only calculation preview from saved workbooks')
+                reason='Read-only calculation preview from saved workbooks',
+                accept_cent_differences=old.get('accept_cent_differences',False) if (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'] else False)
+    if raw:
+        from services.dhl_revenue_policy import payout_transport
+        from services.monthly_expense_dates import validate_source
+        scan=payout_transport(bytes(raw['content']),month,accept_cent_differences=True)
+        adjustments=[i for i in scan['issues'] if i['code']=='source_cent_difference_calculated'] if scan else []
+        accepted=bool(batch and batch['decisions'].get('accept_cent_differences') and
+            (batch['decisions'].get('historical_review') or {}).get('sha256')==raw['content_sha256'])
+        source,_=_sources(conn,month)
+        checked=accepted and not validate_source(files.resolve_review(conn,files.reference(raw),month),
+            batch['decisions'].get('date_dispositions',{}),source,month,accept_cent_differences=True)
+        from decimal import Decimal
+        metadata['cent_difference_review']=dict(accepted=accepted,rows=adjustments,
+            migration_ready=conn.execute(text("SELECT to_regprocedure('dhl_component_cent_admin_fee(dhl_monthly_expense_rows,jsonb)') IS NOT NULL")).scalar_one(),
+            calculated_gross=format(sum((Decimal(t['inclusive']) for t in scan['transactions']),Decimal('0.00')),'.2f') if checked else None)
     # Revenue-only trucks must remain visible; missing expense rows are not an
     # instruction to fabricate zero expenses or drop their revenue.
     from services.monthly_expense_persistence import _plate
@@ -171,8 +199,11 @@ def state(conn, month):
     missing = []
     for plate in sorted(source_plates - roster):
         records = [r for r in source if _plate(r['truck_plate']) == plate]
-        valid = bool(review and not validate_source(review, {}, source, month, target_plate=plate))
+        accept_cent=bool(batch and batch['decisions'].get('accept_cent_differences'))
+        valid = bool(review and not validate_source(review, {}, source, month, target_plate=plate,accept_cent_differences=accept_cent))
         gross = sum((money(r['distribution_cost']) + money(r['offloading_cost']) for r in records), Decimal('0.00')) if valid else None
+        if valid and accept_cent:
+            gross=sum((Decimal(t['inclusive']) for t in scan['transactions'] if t['plate']==plate),Decimal('0.00'))
         matches = [dict(v) for v in vehicles if _plate(v['plate_number']) == plate]
         vehicle = matches[0] if len(matches) == 1 else {}
         missing.append(dict(normalized_plate=plate, id=None, vehicle_id=vehicle.get('id'), vehicle_owner_snapshot=vehicle,

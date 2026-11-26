@@ -54,6 +54,11 @@ def validate_snapshot(row):
 def transport_components(row):
     """Use frozen confirmed source rows, never live trips/manual payslips."""
     from services.monthly_expense_parser import money
+    from services.dhl_revenue_policy import COMPONENT_POLICY, snapshot_fee
+    transport=row.get('cell_audit',{}).get('_dhl_transport')
+    if transport and transport['policy']==COMPONENT_POLICY:
+        snapshot_fee(row)
+        return money(transport['distribution'])+money(transport['surcharge']),money(transport['offloading'])
     distribution = sum((money(r['distribution_cost']) for r in row['dhl_source_snapshot']), Decimal('0.00'))
     offloading = sum((money(r['offloading_cost']) for r in row['dhl_source_snapshot']), Decimal('0.00'))
     if distribution + offloading != row['gross']:

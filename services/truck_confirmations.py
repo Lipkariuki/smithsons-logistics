@@ -60,7 +60,8 @@ def validate_truck(conn,batch,row,context=None):
     # Include all live selected-month records, including trucks outside the roster.
     from services.monthly_files import resolve_review
     blockers+=validate_source(resolve_review(conn,batch['decisions'].get('historical_review'),batch['reporting_month']),batch['decisions'].get('date_dispositions',{}),
-        source,batch['reporting_month'],target_plate=row['normalized_plate'],_inspected=inspected)
+        source,batch['reporting_month'],target_plate=row['normalized_plate'],_inspected=inspected,
+        accept_cent_differences=batch['decisions'].get('accept_cent_differences',False))
     if blockers:
         raise ValidationBlocked('; '.join(i['message'] for i in blockers))
     target=rebuilt.get(row['source_row'])
