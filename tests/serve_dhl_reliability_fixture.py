@@ -36,19 +36,36 @@ def main():
         net=(ROOT/'data/SEPTEMBER 2026 NET SUMMARY.xlsx').read_bytes()
         _,manifest=inspect_source(raw,month);parsed=parse_expenses(net,month)
         plates=sorted({k[1] for k in manifest}|{r.plate for r in parsed.rows})
+        august=None
+        if os.environ.get('DHL_LOCAL_INCLUDE_AUGUST')=='1':
+            _,august=inspect_source((ROOT/'data/AUGUST 2026 GROSS TOTALS.xlsx').read_bytes(),date(2026,8,1))
+            aug_expenses=parse_expenses((ROOT/'data/AUGUST 2026 NET SUMMARY 1.xlsx').read_bytes(),date(2026,8,1))
+            plates=sorted(set(plates)|{k[1] for k in august}|{r.plate for r in aug_expenses.rows})
         with fixture.engine.begin() as conn:
             fixture.install(conn)
             conn.execute(text("UPDATE users SET name='Synthetic local administrator' WHERE id=7"))
             for i,plate in enumerate(plates,100):conn.execute(text("INSERT INTO vehicles VALUES(:id,:plate,7,'30T')"),dict(id=i,plate=plate))
             for i,(k,v) in enumerate(manifest.items(),1000):conn.execute(text('INSERT INTO dhl_orders VALUES(:id,:ref,:date,:plate,:vehicle,:dist,:off,:gross)'),dict(id=i,ref=k[2],date=k[0],plate=k[1],vehicle=100+plates.index(k[1]),dist=v[0],off=v[1],gross=sum(v)))
+            for i,(k,v) in enumerate((august or {}).items(),2000):conn.execute(text('INSERT INTO dhl_orders VALUES(:id,:ref,:date,:plate,:vehicle,:dist,:off,:gross)'),dict(id=i,ref=k[2],date=k[0],plate=k[1],vehicle=100+plates.index(k[1]),dist=v[0],off=v[1],gross=sum(v)))
         def connection():
             with fixture.engine.begin() as conn:yield conn
         admin=api.auth_functions(fixture.engine)
         fixture.app.include_router(create_router(connection,admin))
+        from services.dhl_performance import install
+        install(fixture.app,fixture.engine)
+        # Explicitly opt-in local slow-server simulation for transfer tests.
+        delay=float(os.environ.get('DHL_LOCAL_TRANSFER_TEST_DELAY','0'))
+        if delay:
+            import asyncio
+            @fixture.app.middleware('http')
+            async def transfer_delay(request,call_next):
+                if request.method=='POST' and request.url.path.endswith(('/expenses','/dhl')):
+                    await asyncio.sleep(min(delay,2))
+                return await call_next(request)
         @fixture.app.get('/users/me')
         def me(actor=Depends(admin)):
             return dict(id=actor.id,name=actor.name,role=actor.role)
-        fixture.app.add_middleware(CORSMiddleware,allow_origins=['http://127.0.0.1:8067'],allow_methods=['GET','POST','OPTIONS'],allow_headers=['Authorization','Content-Type'])
+        fixture.app.add_middleware(CORSMiddleware,allow_origins=['http://127.0.0.1:8067'],allow_methods=['GET','POST','OPTIONS'],allow_headers=['Authorization','Content-Type'],expose_headers=['Content-Length','X-Request-ID','Server-Timing'])
         token=jwt.encode({'sub':'7','role':'admin','exp':datetime.now(timezone.utc)+timedelta(hours=1)},'isolated-phase3-test-only',algorithm='HS256')
         book=load_workbook(io.BytesIO(net));ws=book.active
         # Deliberately synthetic local correction; never modifies either source file.

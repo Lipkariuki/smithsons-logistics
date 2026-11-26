@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from services.monthly_reporting_scope import reporting_read_scope
 
 from routers.monthly_expense_reports import _run
 from services.monthly_statement_documents import (create_document, get_document,
@@ -22,6 +23,7 @@ def create_router(connection_dependency, admin_dependency):
                        dependencies=[Depends(no_cache)])
 
     @router.post('/expense-rows/{row_id}/confirm')
+    @reporting_read_scope()
     def confirm_truck_row(row_id: int, payload: TruckConfirmationRequest,
                           actor=Depends(admin_dependency),conn=Depends(connection_dependency)):
         from services.truck_confirmations import confirm_truck
@@ -43,6 +45,8 @@ def create_router(connection_dependency, admin_dependency):
         doc = _run(get_document, conn, document_id)
         return Response(bytes(doc['pdf_content']), media_type='application/pdf', headers={
             'Cache-Control': 'no-store',
+            'Content-Length': str(len(doc['pdf_content'])),
+            'X-Content-Type-Options': 'nosniff',
             'Content-Disposition': f'attachment; filename="smithsons_monthly_transport_statement_{doc["id"]}.pdf"',
             'X-Content-SHA256': doc['pdf_sha256']})
 

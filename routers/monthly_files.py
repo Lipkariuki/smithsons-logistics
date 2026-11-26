@@ -8,6 +8,7 @@ from services.monthly_expense_persistence import get_import
 from sqlalchemy import select
 from routers.monthly_expense_reports import _run, _upload
 from services.monthly_expense_reports import decimal_json
+from services.monthly_reporting_scope import reporting_read_scope
 
 
 def attachment(content,filename):
@@ -25,6 +26,7 @@ def create_router(connection_dependency,admin_dependency):
   if month.day!=1:raise HTTPException(422,'Select the first day of the reporting month')
   return decimal_json(_run(files.month_files,conn,month))
  @router.post('/dhl')
+ @reporting_read_scope()
  def save_raw(month:date=Form(...),file:UploadFile=File(...),previous_id:int|None=Form(None),reason:str=Form(''),actor=Depends(admin_dependency),conn=Depends(connection_dependency)):
   if not files.available(conn):raise HTTPException(503,'Saved raw-file storage requires the approved 005 migration')
   record=_run(files.register,conn,_upload(file),month,file.filename,actor.id,previous_id,reason)

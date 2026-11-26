@@ -124,6 +124,7 @@ def _activity_defaults(conn, month, raw, content, mappings, dispositions, proofs
     return result
 
 
+@reporting_read_scope()
 def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
                 content=None, filename=None, mappings=None, no_activity=None,accept_cent_differences=None):
     """Idempotent autosave; never mutate a previous snapshot or issue a PDF.
@@ -208,10 +209,10 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
                               'No files or figures changed; review the saved history before correcting the source.') from None
 
 
-def state(conn, month):
+def state(conn, month, *, latest_files_only=False):
     if month.day != 1:
         raise ValueError('Choose a reporting month')
-    metadata = files.month_files(conn, month)
+    metadata = files.month_files(conn, month,latest_only=latest_files_only)
     batch = latest(conn, month)
     raw = raw_latest(conn, month)
     if batch and raw and batch['status'] == 'draft':

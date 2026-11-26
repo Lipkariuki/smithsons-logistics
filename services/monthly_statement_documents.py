@@ -13,6 +13,7 @@ from sqlalchemy import (MetaData, Table, Column, BigInteger, LargeBinary, String
 
 from services.monthly_expense_models import imports, rows
 from utils.payslip_branding import payslip_text
+from services.dhl_performance import timed
 
 RENDERER = 'smithsons-monthly-statement-v3-revenue-breakdown'
 DIST_ADMIN_RENDERER = 'smithsons-monthly-statement-v4-dist-admin'
@@ -160,21 +161,30 @@ def render_statement(row, batch):
     return content.encode('latin1') if isinstance(content, str) else bytes(content)
 
 
-def get_document(conn, identifier):
-    document = dict(conn.execute(select(documents).where(documents.c.id == identifier)).mappings().one())
+def _checked_document(document):
+    document=dict(document)
     content = bytes(document['pdf_content'])
     if hashlib.sha256(content).hexdigest() != document['pdf_sha256']:
         raise ValueError('Stored statement integrity check failed')
     return document
 
 
+@timed('pdf_lookup')
+def get_document(conn, identifier):
+    return _checked_document(conn.execute(select(documents).where(documents.c.id == identifier)).mappings().one())
+
+
+@timed('pdf_prepare')
 def create_document(conn, row_id, actor_id):
+    existing=conn.execute(select(documents).where(documents.c.expense_row_id==row_id)).mappings().first()
+    if existing is not None:return _checked_document(existing)
     # Use the same month -> parent lock ordering as financial confirmation.
     row = dict(conn.execute(select(rows).where(rows.c.id == row_id)).mappings().one())
     from services.monthly_expense_persistence import _lock
     month=conn.execute(select(imports.c.reporting_month).where(imports.c.id==row['import_id'])).scalar_one()
     _lock(conn,month)
-    batch = dict(conn.execute(select(imports).where(imports.c.id == row['import_id']).with_for_update()).mappings().one())
+    batch = dict(conn.execute(select(imports.c.id,imports.c.reporting_month,imports.c.version,
+        imports.c.status,imports.c.issues).where(imports.c.id == row['import_id']).with_for_update()).mappings().one())
     # A draft may have been edited/confirmed while waiting for the parent lock.
     # Re-read only after that lock, rather than rendering an earlier row image.
     row = dict(conn.execute(select(rows).where(rows.c.id == row_id)).mappings().one())

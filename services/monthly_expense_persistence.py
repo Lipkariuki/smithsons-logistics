@@ -19,6 +19,7 @@ from services.monthly_expense_parser import parse_expenses, OPTIONAL_CATEGORY, m
 from services.monthly_expense_calculations import RevenueEvidence, RevenueStatus, calculate_monthly_expenses
 from services.monthly_expense_reconciliation import validate_reference_columns
 from services.monthly_expense_dates import validate_source
+from services.dhl_performance import timed
 
 POLICY = {'version': 'monthly-expenses-v2', 'parser_version': 'flexible-xlsx-v2',
           'blank_expenses': 'zero_with_audit', 'absent_categories': 'zero_no_carry_forward',
@@ -100,10 +101,10 @@ def _sources(conn, month):
     return snapshot, _hash(snapshot)
 
 
-def _build(conn, content, month, decisions, actor, audit_time):
+def _build(conn, content, month, decisions, actor, audit_time, *, target_plate=None, source_snapshot=None):
     preview = parse_expenses(content, month, sheet_name=decisions['sheet_name'],
                              approved_mappings=decisions['approved_mappings'], corrections=decisions['corrections'])
-    source, fingerprint = _sources(conn, month)
+    source, fingerprint = source_snapshot if source_snapshot is not None else _sources(conn, month)
     from services.monthly_files import resolve_review
     source_review = resolve_review(conn, decisions.get('historical_review'), month)
     # Archived evidence must support this truck before labelling its revenue
@@ -135,6 +136,7 @@ def _build(conn, content, month, decisions, actor, audit_time):
             header.update(approval_source='reused_approval',approved_by=prior['approved_by'],approved_at=prior['approved_at'],approval_import_id=prior['import_id'])
     payloads = []
     for row in preview.rows:
+        if target_plate is not None and row.plate!=target_plate:continue
         issues = [asdict(i) for i in row.issues]
         if transport and any(h.classification=='expense' and 'admin' in normalize_header(h.original_header) for h in preview.headers):
             issues.append(dict(code='possible_admin_fee_overlap',message='An approved expense header mentions admin; review possible overlap with the separately calculated administration fee.',cell=None,blocking=True))
@@ -291,6 +293,7 @@ def _new_source_decisions(conn,month,decisions,mode='auto'):
     return decisions
 
 
+@timed('expense_save')
 def create_draft(conn, content: bytes, month: date, filename: str, uploader_id: int, *,
                  approved_mappings=None, corrections=None, verified_no_activity=None,
                  source_verification='', reason='', previous_version_id=None, sheet_name=None,
@@ -352,11 +355,12 @@ def preview_import(conn, content, month, actor_id, **options):
                 uploader_id=actor_id, created_at=now, **batch)
 
 
-def get_import(conn, import_id):
+def get_import(conn, import_id, *, target_plate=None):
     batch = conn.execute(select(imports).where(imports.c.id == import_id)).mappings().one()
     detail = dict(batch)
-    detail['rows'] = [dict(row) for row in conn.execute(select(rows).where(rows.c.import_id == import_id)
-                                                       .order_by(rows.c.source_row)).mappings()]
+    query=select(rows).where(rows.c.import_id==import_id)
+    if target_plate is not None:query=query.where(rows.c.normalized_plate==target_plate)
+    detail['rows'] = [dict(row) for row in conn.execute(query.order_by(rows.c.source_row)).mappings()]
     return detail
 
 

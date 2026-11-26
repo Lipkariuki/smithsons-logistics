@@ -32,6 +32,8 @@ import os
 import re
 
 app = FastAPI()
+from services.dhl_performance import install as install_dhl_performance
+install_dhl_performance(app,engine)
 
 # ✅ CORS setup — configurable via env, with safe defaults
 # - CORS_ORIGINS: comma-separated list (exact origins)
@@ -57,7 +59,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
+    expose_headers=["Content-Disposition", "Content-Length", "X-Request-ID", "X-Release-Commit", "Server-Timing"],
 )
 
 # ✅ Include all routers BEFORE static files

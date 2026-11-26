@@ -11,6 +11,7 @@ import unicodedata
 from openpyxl import load_workbook
 from services.monthly_expense_parser import validate_xlsx_envelope, normalize_header, money, normalize_registration
 from services.monthly_reporting_scope import request_read
+from services.dhl_performance import timed
 
 
 def _plate(value):
@@ -23,6 +24,7 @@ def _ref(value):
 
 
 @request_read
+@timed('dhl_parse')
 def inspect_source(content: bytes, month: date):
     validate_xlsx_envelope(content)
     wb = load_workbook(io.BytesIO(content), data_only=True)
@@ -157,6 +159,7 @@ def charge_issues(content, month, target_plate=None, *, accept_cent_differences=
             if not target_plate or not plate or plate == target_plate]
 
 
+@timed('reconciliation')
 def validate_source(review, dispositions, source, month, *, target_plate=None, _inspected=None, accept_cent_differences=False,reconcile_source_rounding=False):
     """Reparse retained bytes every build/confirmation; flags cannot supply results."""
     def issue(code, message): return {'code': code, 'message': message, 'cell': None, 'blocking': True}

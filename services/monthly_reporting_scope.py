@@ -29,7 +29,11 @@ def request_read(function):
         cache = _reads.get()
         if cache is None:
             return function(*args, **kwargs)
-        key = (function.__module__, function.__qualname__, args, tuple(sorted(kwargs.items())))
+        def freeze(value):
+            if isinstance(value,dict):return tuple(sorted((k,freeze(v)) for k,v in value.items()))
+            if isinstance(value,(list,tuple)):return tuple(freeze(v) for v in value)
+            return value
+        key = (function.__module__, function.__qualname__, freeze(args), freeze(kwargs))
         if key not in cache:
             cache[key] = function(*args, **kwargs)
         # Callers may append audit details; never let them poison another use.

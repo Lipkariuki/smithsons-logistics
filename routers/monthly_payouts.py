@@ -23,16 +23,22 @@ def create_router(connection_dependency, admin_dependency):
 
     router = APIRouter(prefix='/dhl-reports/monthly-payouts', tags=['Monthly Payouts'], dependencies=[Depends(no_cache)])
 
-    def view(conn, month):
+    def view(conn, month,lightweight=False):
         with reporting_read_scope():
-            return render_month(conn, month)
+            return render_month(conn, month,lightweight)
 
-    def render_month(conn, month):
-        metadata, batch = _run(payouts.state, conn, month)
-        from services.truck_confirmations import presentation
-        saved = _run(payouts.latest, conn, month)
-        states = _run(presentation, conn, saved) if saved else None
+    def render_month(conn, month,lightweight=False):
+        metadata, batch = _run(payouts.state, conn, month,latest_files_only=lightweight)
         report = _view(conn, batch) if batch else None
+        approvals=(report or {}).get('truck_confirmation_summary',{}).get('current_approvals')
+        if approvals is None:
+            from sqlalchemy import select
+            from services.truck_confirmations import confirmations,available
+            from services.monthly_expense_models import rows
+            query=select(confirmations,rows.c.import_id,rows.c.vehicle_owner_snapshot['owner_name'].astext.label('owner_name'),
+                rows.c.gross,rows.c.operating_expenses,rows.c.commission,rows.c.net_payable).join(rows,rows.c.id==confirmations.c.expense_row_id).where(
+                    confirmations.c.reporting_month==month,confirmations.c.status=='current')
+            approvals=[dict(r) for r in conn.execute(query).mappings()] if available(conn) else []
         if report:
             # A revenue-only truck must not disappear from the monthly control
             # totals or make an incomplete month appear fully calculated.
@@ -57,22 +63,38 @@ def create_router(connection_dependency, admin_dependency):
                         row['revenue_breakdown']=dict(distribution=t['distribution'],surcharge=t['surcharge'],offloading=t['offloading'],
                             rounding_difference=format(Decimal(t['gross'])-Decimal(t['distribution'])-Decimal(t['surcharge'])-Decimal(t['offloading']),'.2f'))
         return dict(files=decimal_json(metadata), report=report,
-                    approvals=decimal_json(states['current_approvals']) if states else [])
+                    approvals=decimal_json(approvals))
 
     @router.get('/{month}')
     def get_month(month: date, actor=Depends(admin_dependency), conn=Depends(connection_dependency)):
         return view(conn, month)
 
+    @router.get('/{month}/overview')
+    def get_overview(month: date,actor=Depends(admin_dependency),conn=Depends(connection_dependency)):
+        from services.monthly_payout_reads import overview
+        return _run(overview,conn,month,lambda c,m:view(c,m,True))
+
+    @router.get('/{month}/trucks/{plate}')
+    def get_truck(month:date,plate:str,actor=Depends(admin_dependency),conn=Depends(connection_dependency)):
+        from services.monthly_payout_reads import truck_detail
+        return _run(truck_detail,conn,month,plate,lambda c,m:view(c,m,True))
+
     @router.post('/{month}/sync')
-    def sync(month: date, payload: SyncRequest, actor=Depends(admin_dependency), conn=Depends(connection_dependency)):
+    def sync(month: date, payload: SyncRequest, compact:bool=False,actor=Depends(admin_dependency), conn=Depends(connection_dependency)):
         _run(payouts.synchronize, conn, month, actor.id, **payload.model_dump())
+        if compact:
+            from services.monthly_payout_reads import overview
+            return _run(overview,conn,month,lambda c,m:view(c,m,True))
         return view(conn, month)
 
     @router.post('/{month}/expenses')
     def expenses(month: date, file: UploadFile = File(...), expected_report_id: int | None = Form(None),
-                 expected_raw_id: int | None = Form(None), actor=Depends(admin_dependency), conn=Depends(connection_dependency)):
+                 expected_raw_id: int | None = Form(None), compact:bool=False, actor=Depends(admin_dependency), conn=Depends(connection_dependency)):
         _run(payouts.synchronize, conn, month, actor.id, content=_upload(file), filename=file.filename,
              expected_report_id=expected_report_id, expected_raw_id=expected_raw_id)
+        if compact:
+            from services.monthly_payout_reads import overview
+            return _run(overview,conn,month,lambda c,m:view(c,m,True))
         return view(conn, month)
 
     return router

@@ -59,6 +59,8 @@ def get_connection():
             conn.execute(text("SET LOCAL statement_timeout = '30s'"))
             yield conn
     except OperationalError as exc:
+        from services.dhl_performance import database_failure
+        database_failure(exc)
         raise HTTPException(503, 'Database unavailable or busy; retry the request') from exc
 
 
@@ -76,6 +78,8 @@ def _run(operation, *args, **kwargs):
     except IntegrityError as exc:
         raise HTTPException(409, 'Import integrity conflict; refresh and review the report') from exc
     except OperationalError as exc:
+        from services.dhl_performance import database_failure
+        database_failure(exc)
         raise HTTPException(503, 'Database unavailable or busy; retry the request') from exc
     except ProgrammingError as exc:
         if getattr(exc.orig, 'sqlstate', None) == '42P01':

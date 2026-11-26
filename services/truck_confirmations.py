@@ -12,6 +12,7 @@ from services.monthly_expense_persistence import (_lock, _hash, _build, _sources
 from services.monthly_expense_dates import validate_source, inspect_source
 from services.monthly_expense_persistence import _plate
 from services.monthly_statement_documents import validate_snapshot
+from services.monthly_reporting_scope import reporting_read_scope
 
 metadata=MetaData()
 confirmations=Table('dhl_monthly_truck_confirmations',metadata,
@@ -27,7 +28,7 @@ def available(conn):
     return conn.execute(text("SELECT to_regclass('dhl_monthly_truck_confirmations') IS NOT NULL")).scalar_one()
 
 
-def _context(conn,batch):
+def _context(conn,batch,target_plate=None):
     if not supported_policy(batch['calculation_policy']):
         raise ValidationBlocked('Revise this report into the current calculation policy')
     import hashlib
@@ -35,8 +36,9 @@ def _context(conn,batch):
         raise ValidationBlocked('Workbook or decision checksum changed')
     if batch['source_verification']!=batch['decisions']['source_verification']:
         raise ValidationBlocked('Source verification changed')
+    source,fingerprint=_sources(conn,batch['reporting_month'])
     expected, expected_rows, _ = _build(conn,bytes(batch['source_content']),batch['reporting_month'],
-        batch['decisions'],batch['uploader_id'],batch['created_at'].isoformat())
+        batch['decisions'],batch['uploader_id'],batch['created_at'].isoformat(),target_plate=target_plate,source_snapshot=(source,fingerprint))
     if batch['calculation_policy']!=expected['calculation_policy']:
         raise ValidationBlocked('Source calculation policy changed; create a new report version')
     if any(batch[k]!=v for k,v in expected.items()):
@@ -47,12 +49,11 @@ def _context(conn,batch):
     from services.monthly_files import resolve_review
     review=resolve_review(conn,batch['decisions'].get('historical_review'),batch['reporting_month'])
     inspected=inspect_source(base64.b64decode(review['source_content_base64'],validate=True),batch['reporting_month']) if review and review.get('source_content_base64') else None
-    source,_=_sources(conn,batch['reporting_month'])
     return expected, {r['source_row']:r for r in expected_rows}, inspected, source
 
 
 def validate_truck(conn,batch,row,context=None):
-    expected, rebuilt, inspected, source = context or _context(conn,batch)
+    expected, rebuilt, inspected, source = context or _context(conn,batch,row['normalized_plate'])
     date_codes={'source_dates_unreviewed','missing_source_date','invalid_source_date','out_of_period_date',
                 'invalid_source_identity','invalid_source_amount','source_gross_inconsistent','source_manifest_mismatch',
                 'duplicate_source_row','unsupported_source_charge','inclusive_amount_mismatch','source_marked_error','offloading_surcharge_review'}
@@ -88,13 +89,14 @@ def _current(conn,month,plate):
         confirmations.c.normalized_plate==plate,confirmations.c.status=='current')).mappings().first()
 
 
+@reporting_read_scope()
 def confirm_truck(conn,row_id,actor_id,reason,expected_current_confirmation_id=None):
     if actor_id<=0 or not reason.strip():raise ValueError('A confirmer and audit reason are required')
     row=dict(conn.execute(select(rows).where(rows.c.id==row_id)).mappings().one())
     month=conn.execute(select(imports.c.reporting_month).where(imports.c.id==row['import_id'])).scalar_one()
     _lock(conn,month)
     conn.execute(select(imports.c.id).where(imports.c.id==row['import_id']).with_for_update()).scalar_one()
-    batch=get_import(conn,row['import_id']);row=next(r for r in batch['rows'] if r['id']==row_id)
+    batch=get_import(conn,row['import_id'],target_plate=row['normalized_plate']);row=next(r for r in batch['rows'] if r['id']==row_id)
     existing=conn.execute(select(confirmations).where(confirmations.c.expense_row_id==row_id)).mappings().first()
     if existing:
         if existing['status']!='current':raise VersionConflict('This truck confirmation was superseded; use its stored history')

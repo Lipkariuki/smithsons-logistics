@@ -110,14 +110,18 @@ def verification(conn,record):
   message='Evidence only. No DHL records, payslips or financial approvals were changed. Review and save a new expense report version using the retained workbook.')
 
 
-def month_files(conn,month):
+def month_files(conn,month,*,latest_only=False):
  from services.monthly_expense_persistence import _sources
  from services.monthly_expense_parser import money
  source,fingerprint=_sources(conn,month)
- batches=[dict(r) for r in conn.execute(select(*[c for c in imports.c if c.name!='source_content']).where(imports.c.reporting_month==month).order_by(imports.c.version.desc())).mappings()]
+ query=select(*[c for c in imports.c if c.name!='source_content']).where(imports.c.reporting_month==month).order_by(imports.c.version.desc())
+ if latest_only:query=query.limit(1)
+ batches=[dict(r) for r in conn.execute(query).mappings()]
  archived=[]
  if available(conn):
-  for r in conn.execute(select(*[c for c in workbooks.c if c.name!='content']).where(workbooks.c.reporting_month==month).order_by(workbooks.c.version.desc())).mappings():
+  query=select(*[c for c in workbooks.c if c.name!='content']).where(workbooks.c.reporting_month==month).order_by(workbooks.c.version.desc())
+  if latest_only:query=query.limit(1)
+  for r in conn.execute(query).mappings():
    entry=metadata_view(r)
    # Exact retained manifest is reparsed; upload is not a financial approval.
    check=verification(conn,get(conn,r['id']))

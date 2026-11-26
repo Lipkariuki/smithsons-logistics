@@ -16,6 +16,8 @@ from typing import Mapping
 from zipfile import BadZipFile, ZipFile
 
 from openpyxl import load_workbook
+from services.monthly_reporting_scope import request_read
+from services.dhl_performance import timed
 
 CENT = Decimal('0.01')
 OPTIONAL_CATEGORY = 'kasarani_ksm_fuel'
@@ -180,6 +182,8 @@ def validate_xlsx_envelope(content: bytes) -> None:
         raise ValueError('Expected an XLSX workbook') from exc
 
 
+@request_read
+@timed('expense_parse')
 def parse_expenses(
     content: bytes, month: date, *, sheet_name: str | None = None,
     approved_mappings: Mapping[str, str | None] | None = None,

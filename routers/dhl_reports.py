@@ -157,7 +157,8 @@ def _generate_payslip_pdf(payslip: DHLPayslip, vehicle: Vehicle) -> bytes:
 
 @router.post("/upload")
 def upload_dhl_report(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    raw_workbook_id: Optional[int] = None,
     replace: bool = Query(True),
     reporting_month: Optional[date] = Query(None),
     source_previous_id: Optional[int] = Query(None, gt=0),
@@ -165,13 +166,26 @@ def upload_dhl_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    content = file.file.read(20_000_001)
+    retained_record=None
+    if raw_workbook_id is not None:
+        if raw_workbook_id<=0 or file is not None:
+            raise HTTPException(422,'Choose either an uploaded file or one saved workbook')
+        from services import monthly_files as saved_files
+        from sqlalchemy.exc import NoResultFound
+        try:retained_record=saved_files.get(db.connection(),raw_workbook_id)
+        except NoResultFound:raise HTTPException(404,'Saved workbook not found') from None
+        if reporting_month is None or retained_record['reporting_month']!=reporting_month:
+            raise HTTPException(422,'Saved workbook does not match the selected reporting month')
+        content=bytes(retained_record['content']);filename=retained_record['original_filename']
+    else:
+        if file is None:raise HTTPException(422,'Choose a workbook')
+        content = file.file.read(20_000_001);filename=file.filename
     if len(content)>20_000_000:
         raise HTTPException(413, 'Workbook exceeds 20 MB')
     if not content:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
 
-    retained_id = None
+    retained_id = retained_record['id'] if retained_record else None
     try:
         _, period_start, period_end = parse_dhl_excel(content)
         if reporting_month is not None and reporting_month != period_start:
@@ -196,10 +210,10 @@ def upload_dhl_report(
                     "to preserve them; no DHL records were changed. Review the source "
                     "and confirmed monthly report workflow before proceeding."
                 ))
-        if archive_enabled and (file.filename or '').lower().endswith('.xlsx'):
+        if archive_enabled and retained_record is None and (filename or '').lower().endswith('.xlsx'):
             from services.monthly_expense_persistence import VersionConflict
             try:
-                archive = saved_files.register(db.connection(),content,period_start,file.filename,current_user.id,
+                archive = saved_files.register(db.connection(),content,period_start,filename,current_user.id,
                     source_previous_id,source_reason)
             except VersionConflict as exc:
                 raise HTTPException(409,str(exc)) from None
