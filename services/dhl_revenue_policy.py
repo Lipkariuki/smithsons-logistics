@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 import io
 from openpyxl import load_workbook
-from services.monthly_expense_parser import money, normalize_header, validate_xlsx_envelope
+from services.monthly_expense_parser import money, normalize_header, validate_xlsx_envelope, normalize_registration
 from services.monthly_reporting_scope import request_read
 
 POLICY = 'dist-surcharge-admin-v1'
@@ -17,8 +17,8 @@ CENT = Decimal('.01')
 
 def is_new_format(names):
     present = HEADERS.intersection(names)
-    if present and present != HEADERS:
-        raise ValueError('Incomplete surcharge/admin workbook headers; all four source columns are required')
+    if present and not {'surcharge','amount inc surcharge'}.issubset(names):
+        raise ValueError('Incomplete surcharge workbook headers; SURCHARGE and AMOUNT INC SURCHARGE are required')
     return bool(present)
 
 
@@ -47,7 +47,7 @@ def inspect_transport(content, month):
                 try:day=date.fromisoformat(day.strip())
                 except ValueError:continue
             if not isinstance(day,date) or (day.year,day.month)!=(month.year,month.month):continue
-            plate=''.join(str(v['truck'] or '').split()).upper()
+            plate=normalize_registration(v['truck'])
             ref=str(v['ref no'] if v['ref no'] is not None else '').strip();ref=ref[:-2] if ref.endswith('.0') else ref
             key=(day.isoformat(),plate,ref)
             if marked and marked_key is None:marked_key=key
@@ -76,7 +76,7 @@ def inspect_transport(content, month):
                 issue('offloading_surcharge_review','Surcharge is approved for DIST only; review this Offloading surcharge.')
             fee=(inclusive*Decimal('.05')).quantize(CENT,rounding=ROUND_HALF_UP) if item['cost']=='dist' else Decimal('0.00')
             item.update(amount=format(amount,'.2f'),surcharge=format(surcharge,'.2f'),inclusive=format(inclusive,'.2f'),admin_fee=format(fee,'.2f'))
-            comparison=v['5 admin fee']
+            comparison=v.get('5 admin fee')
             if comparison is not None:
                 try:reference=money(comparison)
                 except ValueError:issue('admin_fee_reference_invalid','Workbook fee is not numeric; calculated fee is unchanged.',False)
@@ -93,9 +93,14 @@ def inspect_transport(content, month):
 def truck_snapshot(inspection, plate, month):
     transactions=[dict(t) for t in inspection['transactions'] if t['plate']==plate]
     total=lambda field,kind=None:sum((Decimal(t[field]) for t in transactions if kind is None or t['cost']==kind),Decimal('0.00'))
-    return dict(policy=inspection['policy'],reporting_month=month.isoformat(),transactions=transactions,
+    result=dict(policy=inspection['policy'],reporting_month=month.isoformat(),transactions=transactions,
                 distribution=format(total('amount','dist'),'.2f'),offloading=format(total('amount','offloading'),'.2f'),
                 surcharge=format(total('surcharge'),'.2f'),gross=format(total('inclusive'),'.2f'),admin_fee=format(total('admin_fee'),'.2f'))
+    if inspection['policy']=='source-inclusive-reconciled-v1':
+        result.update(rounding_difference=format(total('inclusive')-total('amount')-total('surcharge'),'.2f'),
+            rounding_absolute_total=format(sum((abs(Decimal(t['rounding_reconciliation']['difference'])) for t in transactions if t.get('rounding_reconciliation')),Decimal('0.00')),'.2f'),
+            month_rounding_absolute_total=inspection['rounding_absolute_total'])
+    return result
 
 
 @request_read
@@ -132,11 +137,13 @@ def snapshot_fee(row):
     """Validate frozen source arithmetic before displaying or rendering it."""
     snapshot=row.get('cell_audit',{}).get('_dhl_transport')
     if snapshot is None:return Decimal('0.00')
-    if snapshot.get('policy') not in {POLICY,COMPONENT_POLICY}:raise ValueError('Unsupported transport snapshot policy')
+    inclusive_policy=snapshot.get('policy')=='source-inclusive-reconciled-v1'
+    if snapshot.get('policy') not in {POLICY,COMPONENT_POLICY,'source-inclusive-reconciled-v1'}:raise ValueError('Unsupported transport snapshot policy')
     amounts={k:money(snapshot[k]) for k in ('distribution','offloading','surcharge','gross','admin_fee')}
-    if amounts['distribution']+amounts['offloading']+amounts['surcharge']!=amounts['gross']:
+    rounding=money(snapshot['rounding_difference']) if inclusive_policy else Decimal('0.00')
+    if amounts['distribution']+amounts['offloading']+amounts['surcharge']+rounding!=amounts['gross']:
         raise ValueError('Transport components disagree; review source')
-    dist=off=sur=fee=original_dist=original_off=Decimal('0.00');seen=set()
+    dist=off=sur=fee=original_dist=original_off=round_sum=round_abs=Decimal('0.00');seen=set()
     for t in snapshot['transactions']:
         identity=t['source_row']
         if identity in seen:raise ValueError('Duplicate frozen transport row')
@@ -149,7 +156,18 @@ def snapshot_fee(row):
                 raise ValueError('Invalid approved source cent adjustment')
             if t['cost']=='dist':original_dist+=original
             elif t['cost']=='offloading':original_off+=original
-        if a+s!=i:raise ValueError('Frozen inclusive amount mismatch')
+        if a+s!=i:
+            if not inclusive_policy or t['cost']!='dist' or abs(i-a-s)!=CENT:raise ValueError('Frozen inclusive amount mismatch')
+            proof=t.get('rounding_reconciliation',{})
+            if proof.get('evidence')!='inclusive_fee_and_net_references_consistent' or proof.get('status')!='accepted_source_rounding' or any(proof.get(k)!=t[k] for k in ('amount','surcharge','inclusive')) or money(proof['difference'])!=i-a-s:
+                raise ValueError('Missing source rounding evidence')
+            from services.dhl_rounding_reconciliation import _decimal
+            q=_decimal(proof['fee_reference']);net=_decimal(proof['net_reference'])
+            if not (abs(q-i*Decimal('.05'))<=Decimal('.00000001') or q==(i*Decimal('.05')).quantize(CENT,rounding=ROUND_HALF_UP)) or not (abs(net-(i-q))<=Decimal('.00000001') or net==(i-q).quantize(CENT,rounding=ROUND_HALF_UP)):
+                raise ValueError('Contradictory source rounding references')
+            round_sum+=i-a-s;round_abs+=abs(i-a-s)
+        elif inclusive_policy and t.get('rounding_reconciliation'):
+            raise ValueError('Unexpected source rounding evidence on an exact row')
         if t['cost']=='dist':
             if f!=(i*Decimal('.05')).quantize(CENT,rounding=ROUND_HALF_UP):raise ValueError('Frozen DIST admin fee mismatch')
             dist+=a
@@ -160,6 +178,12 @@ def snapshot_fee(row):
         sur+=s;fee+=f
     if (dist,off,sur,fee)!=(amounts['distribution'],amounts['offloading'],amounts['surcharge'],amounts['admin_fee']):raise ValueError('Frozen transport totals mismatch')
     if amounts['gross']!=row['gross']:raise ValueError('Frozen gross mismatch')
+    if inclusive_policy and (rounding!=round_sum or money(snapshot['rounding_absolute_total'])!=round_abs or round_abs>Decimal('.05') or not round_abs<=money(snapshot['month_rounding_absolute_total'])<=Decimal('.25')):
+        raise ValueError('Source rounding cumulative limits exceeded')
+    if inclusive_policy:
+        for cost,field in [('dist','distribution_cost'),('offloading','offloading_cost')]:
+            if sum((money(t['inclusive']) for t in snapshot['transactions'] if t['cost']==cost),Decimal('0.00'))!=sum((money(r[field]) for r in row['dhl_source_snapshot']),Decimal('0.00')):
+                raise ValueError('Source-inclusive snapshot differs from retained ledger')
     if snapshot['policy']==COMPONENT_POLICY:
         ledger=row['dhl_source_snapshot']
         if original_dist!=sum((money(r['distribution_cost']) for r in ledger),Decimal('0.00')) or original_off!=sum((money(r['offloading_cost']) for r in ledger),Decimal('0.00')):

@@ -21,7 +21,7 @@ import test_monthly_expense_persistence as fixture
 import test_monthly_expense_api as api
 import test_saved_monthly_files as saved
 from services import monthly_files,monthly_payouts
-from services.monthly_expense_persistence import create_draft,confirm_import,get_import,DHL_POLICY,ValidationBlocked
+from services.monthly_expense_persistence import create_draft,confirm_import,get_import,DHL_POLICY,INCLUSIVE_POLICY,ValidationBlocked
 from services.monthly_expense_models import rows,imports
 from services.truck_confirmations import confirm_truck
 from services.monthly_statement_documents import create_document,get_document,render_statement
@@ -122,6 +122,8 @@ class AugustPersistenceTests(unittest.TestCase):
         before=self.legacy(conn)
         sql=(ROOT/'migrations/006_dist_surcharge_admin_policy.sql').read_text()
         conn.exec_driver_sql(sql);conn.exec_driver_sql(sql)  # Idempotent guard update.
+        for name in ['007_component_cent_policy.sql','008_source_inclusive_reconciliation.sql']:
+            conn.exec_driver_sql((ROOT/'migrations'/name).read_text())
         self.assertEqual(self.legacy(conn),before)
         self.assertEqual(bytes(get_document(conn,old_doc['id'])['pdf_content']),bytes(old_doc['pdf_content']))
         parsed=parse_expenses(self.net,MONTH)
@@ -138,7 +140,7 @@ class AugustPersistenceTests(unittest.TestCase):
     def test_real_saved_workbooks_confirm_eligible_truck_pdf_and_preserve_history(self):
         from pypdf import PdfReader
         with self.engine.begin() as conn, reporting_read_scope():
-            batch,old_doc=self.prepare(conn);self.assertEqual(batch['calculation_policy'],DHL_POLICY)
+            batch,old_doc=self.prepare(conn);self.assertEqual(batch['calculation_policy'],INCLUSIVE_POLICY)
             kav=next(r for r in batch['rows'] if r['normalized_plate']=='KAV086M')
             self.assertEqual(kav['net_payable'],Decimal('190320.09'))
             from services.monthly_expense_reports import totals,decimal_json
@@ -149,7 +151,7 @@ class AugustPersistenceTests(unittest.TestCase):
             import json
             result_path=Path('/tmp/smithsons-august-verified-calculations.json');result_path.write_text(json.dumps(decimal_json(summary),indent=2));result_path.chmod(0o600)
 
-            for plate in ['KBZ576E','KCE864K','KDH335W','KDM009J','KDA267N']:
+            for plate in ['KDA267N']:
                 row=next(r for r in batch['rows'] if r['normalized_plate']==plate)
                 self.assertIsNone(row['gross']);self.assertTrue(any(i['blocking'] for i in row['issues']))
             monthly_payouts.state(conn,MONTH)
@@ -157,7 +159,7 @@ class AugustPersistenceTests(unittest.TestCase):
             self.assertEqual(reopened['id'],batch['id'])
             confirm_truck(conn,kav['id'],7,'Isolated August KAV source review')
             doc=create_document(conn,kav['id'],7)
-            self.assertEqual(doc['renderer_version'],'smithsons-monthly-statement-v4-dist-admin')
+            self.assertEqual(doc['renderer_version'],'smithsons-monthly-statement-v5-source-rounding')
             content='\n'.join(p.extract_text() for p in PdfReader(io.BytesIO(bytes(doc['pdf_content']))).pages)
             for label in ['Distribution Revenue','Offloading Revenue','DIST Surcharge','Administration Fee','Total Expenses','Net Payable']:
                 self.assertIn(label,content)
@@ -214,7 +216,7 @@ class AugustPersistenceTests(unittest.TestCase):
             audit=dict(kav['cell_audit']);audit['_dhl_transport']=dict(audit['_dhl_transport'],admin_fee='1.00')
             conn.execute(update(rows).where(rows.c.id==kav['id']).values(cell_audit=audit))
             with self.assertRaises(DBAPIError),conn.begin_nested():
-                conn.execute(text('SELECT dhl_dist_admin_fee(r,CAST(:policy AS jsonb)) FROM dhl_monthly_expense_rows r WHERE r.id=:id'),{'id':kav['id'],'policy':__import__('json').dumps(DHL_POLICY)})
+                conn.execute(text('SELECT dhl_dist_admin_fee(r,CAST(:policy AS jsonb)) FROM dhl_monthly_expense_rows r WHERE r.id=:id'),{'id':kav['id'],'policy':__import__('json').dumps(batch['calculation_policy'])})
 
 
 if __name__=='__main__':unittest.main()

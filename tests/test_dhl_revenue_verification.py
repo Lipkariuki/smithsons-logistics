@@ -49,8 +49,9 @@ class DHLRevenueVerificationTests(unittest.TestCase):
   self.assertEqual(self.result['month_source_rows'],848)
   self.assertIn('multiple months',self.result['full_original_import_error'])
  def test_charge_headers_do_not_automatically_become_operating_expenses(self):
-  for header in ['DIST','Offloading','Admin']:
-   self.assertEqual(self.result['unknown_headers'][header],'unknown')
+  for header in ['DIST','Offloading']:
+   self.assertEqual(self.result['unknown_headers'][header],'ignored')
+  self.assertEqual(self.result['unknown_headers']['Admin'],'unknown')
   self.assertEqual(self.result['unknown_deductions'],{'fuel':'100.00','kasarani_ksm_fuel':'0.00'})
   self.assertEqual(self.result['ignored_deductions'],self.result['unknown_deductions'])
  def test_positive_after_expense_commission_and_no_double_deduction(self):

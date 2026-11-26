@@ -31,6 +31,9 @@ class SimplePayoutTests(unittest.TestCase):
 
     def setUp(self):
         saved.SavedFileTests.setUp(self)
+        with self.engine.begin() as conn:
+            for name in ['006_dist_surcharge_admin_policy.sql','007_component_cent_policy.sql','008_source_inclusive_reconciliation.sql']:
+                conn.exec_driver_sql((fixture.ROOT/'migrations'/name).read_text())
         def connection():
             with self.engine.begin() as conn: yield conn
         self.app.include_router(create_router(connection,api.auth_functions(self.engine)))
@@ -110,7 +113,6 @@ class SimplePayoutTests(unittest.TestCase):
                 cell='P3',blocking=True,truck='KAA123B',source_row=3))
             return scan
         with self.engine.begin() as conn:
-            conn.exec_driver_sql((fixture.ROOT/'migrations/006_dist_surcharge_admin_policy.sql').read_text())
             before=self.legacy(conn)
             self.archive(conn,out.getvalue())
             with patch('services.dhl_revenue_policy.inspect_transport',side_effect=old_inspect):
@@ -176,7 +178,6 @@ class SimplePayoutTests(unittest.TestCase):
                 cell=f"P{t['source_row']}",blocking=True,truck=t['plate'],source_row=t['source_row']) for t in rejected]
             return result
         with self.engine.begin() as conn:
-            conn.exec_driver_sql((fixture.ROOT/'migrations/006_dist_surcharge_admin_policy.sql').read_text())
             for i,plate in enumerate(plates,100):
                 conn.execute(text("INSERT INTO vehicles VALUES(:id,:plate,7,'30T')"),dict(id=i,plate=plate))
             for i,(key,amount) in enumerate(manifest.items(),1000):

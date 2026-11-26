@@ -54,6 +54,12 @@ def report_view(batch, versions=(), *, owner_id=None, vehicle_id=None):
         if transport:
             row['dhl_admin_fee']=Decimal(transport['admin_fee']) if row['gross'] is not None else None
         row['comparisons'] = references[row['source_row']]
+        provisional=row.get('cell_audit',{}).get('_provisional_financial')
+        if provisional:row['provisional_financial']=provisional
+        row['financial_status']=('confirmed' if batch['status'] in {'confirmed','superseded'} else
+            'calculated_source_review' if provisional else
+            'ready' if row['gross'] is not None and row['net_payable'] is not None and not any(i['blocking'] for i in row['issues']) else
+            'activity_verification_required' if row['revenue_status']=='missing' and not row['dhl_source_snapshot'] else 'blocked')
     detail.update(rows=selected, versions=list(versions), totals=totals(selected),
                   full_report_totals=totals(batch['rows']),
                   filter_scope={'owner_id': owner_id, 'vehicle_id': vehicle_id},

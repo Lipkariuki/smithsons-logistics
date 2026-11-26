@@ -39,6 +39,8 @@ def create_router(connection_dependency, admin_dependency):
             report['totals'] = decimal_json(totals([*batch['rows'], *metadata['unmatched_trucks']]))
             from services.monthly_statement_documents import transport_components
             for row in report['rows']:
+                if row.get('truck_confirmation',{}).get('record'):row['financial_status']='confirmed'
+                elif row.get('truck_confirmation') and row['financial_status']=='ready' and not row['truck_confirmation']['can_confirm']:row['financial_status']='blocked'
                 if row['gross'] is not None:
                     original = next(r for r in batch['rows'] if r['normalized_plate'] == row['normalized_plate'])
                     dist, off = _run(transport_components, original)
@@ -46,6 +48,14 @@ def create_router(connection_dependency, admin_dependency):
                     transport=original.get('cell_audit',{}).get('_dhl_transport')
                     if transport:
                         row['revenue_breakdown'].update(distribution=transport['distribution'],surcharge=transport['surcharge'])
+                        if transport.get('rounding_difference') is not None:row['revenue_breakdown']['rounding_difference']=transport['rounding_difference']
+                elif row.get('provisional_financial'):
+                    original=next(r for r in batch['rows'] if r['normalized_plate']==row['normalized_plate'])
+                    t=original.get('cell_audit',{}).get('_dhl_transport')
+                    if t:
+                        from decimal import Decimal
+                        row['revenue_breakdown']=dict(distribution=t['distribution'],surcharge=t['surcharge'],offloading=t['offloading'],
+                            rounding_difference=format(Decimal(t['gross'])-Decimal(t['distribution'])-Decimal(t['surcharge'])-Decimal(t['offloading']),'.2f'))
         return dict(files=decimal_json(metadata), report=report,
                     approvals=decimal_json(states['current_approvals']) if states else [])
 

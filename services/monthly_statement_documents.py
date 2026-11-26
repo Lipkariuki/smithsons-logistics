@@ -16,6 +16,7 @@ from utils.payslip_branding import payslip_text
 
 RENDERER = 'smithsons-monthly-statement-v3-revenue-breakdown'
 DIST_ADMIN_RENDERER = 'smithsons-monthly-statement-v4-dist-admin'
+SOURCE_ROUNDING_RENDERER = 'smithsons-monthly-statement-v5-source-rounding'
 metadata = MetaData()  # Deliberately excluded from application create_all.
 documents = Table('monthly_statement_documents', metadata,
     Column('id', BigInteger, primary_key=True),
@@ -131,6 +132,8 @@ def render_statement(row, batch):
     line('Distribution Revenue', distribution)
     line('Offloading Revenue', offloading)
     if transport:line('DIST Surcharge', money(transport['surcharge']))
+    if transport and transport.get('policy')=='source-inclusive-reconciled-v1' and money(transport['rounding_absolute_total'])!=0:
+        line('Source rounding reconciliation',money(transport['rounding_difference']))
     line('Gross Transport Revenue', row['gross'], True)
     if transport:line('Administration Fee (5% of DIST including surcharge)', money(transport['admin_fee']))
     itemized=Decimal('0.00')
@@ -198,7 +201,7 @@ def create_document(conn, row_id, actor_id):
         .order_by(imports.c.version.desc()).limit(1)).scalar_one_or_none()
     content = render_statement(row, dict(batch,truck_confirmation=approval))
     identifier = conn.execute(insert(documents).values(expense_row_id=row_id, previous_document_id=previous,
-        pdf_content=content, pdf_sha256=hashlib.sha256(content).hexdigest(), renderer_version=DIST_ADMIN_RENDERER if row.get('cell_audit',{}).get('_dhl_transport') else RENDERER,
+        pdf_content=content, pdf_sha256=hashlib.sha256(content).hexdigest(), renderer_version=SOURCE_ROUNDING_RENDERER if row.get('cell_audit',{}).get('_dhl_transport',{}).get('policy')=='source-inclusive-reconciled-v1' else DIST_ADMIN_RENDERER if row.get('cell_audit',{}).get('_dhl_transport') else RENDERER,
         generated_by=actor_id, generated_at=text('CURRENT_TIMESTAMP')).returning(documents.c.id)).scalar_one()
     return get_document(conn, identifier)
 

@@ -71,6 +71,28 @@ def raw_latest(conn, month):
     return files.get(conn, identifier) if identifier else None
 
 
+def _approved_expense_defaults(conn):
+    """Reuse only unambiguous explicit expense approvals, never old ignores."""
+    result=conn.execute(text("""SELECT i.id AS import_id,h AS mapping
+        FROM dhl_monthly_expense_imports i,
+        LATERAL jsonb_array_elements(i.header_mappings) h
+        WHERE h->>'classification'='expense' AND h->>'approval_source'='administrator'
+          AND h->>'approved_by' IS NOT NULL
+        ORDER BY i.id DESC"""))
+    from services.monthly_expense_parser import ALIASES,BUSINESS_ALIASES,IGNORED,TRUCK_HEADERS,OWNER_HEADERS,ROW_TYPE_HEADERS,INDEX_HEADERS,header_identity,category_key
+    defaults={};provenance={};categories={}
+    for r in result.mappings():
+        h=r['mapping'];key=header_identity(h['normalized_header']);label=h['label']
+        if key in IGNORED|TRUCK_HEADERS|OWNER_HEADERS|ROW_TYPE_HEADERS|INDEX_HEADERS or (key in ALIASES and key not in BUSINESS_ALIASES):continue
+        try:category_key(label)
+        except ValueError:continue
+        categories.setdefault(key,set()).add(h['category'])
+        if key not in defaults:
+            defaults[key]=label;provenance[key]=dict(label=label,category=h['category'],import_id=r['import_id'],approved_by=h['approved_by'],approved_at=h['approved_at'])
+    return ({k:v for k,v in defaults.items() if len(categories[k])==1},
+            {k:v for k,v in provenance.items() if len(categories[k])==1})
+
+
 def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
                 content=None, filename=None, mappings=None, no_activity=None,accept_cent_differences=None):
     """Idempotent autosave; never mutate a previous snapshot or issue a PDF.
@@ -103,10 +125,13 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
     alias_review = bool(previous and same_raw and _alias_review_needed(previous, raw))
     parser_review = bool(previous and same_raw and _parser_review_needed(previous, raw))
     from services.monthly_expense_persistence import policy_for_review
-    source_policy=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month,accept_cent_differences=accept_cent) if raw else None
+    source_policy=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month,accept_cent_differences=accept_cent,
+        source_reconciliation='legacy' if accept_cent_differences is True else 'auto') if raw else None
     policy_upgrade=bool(previous and raw and previous['calculation_policy']!=source_policy)
+    defaults,reused=_approved_expense_defaults(conn) if not previous and mappings is None else ({},old.get('reused_category_mappings',{}))
     options = dict(
-        approved_mappings=mappings if mappings is not None else old.get('approved_mappings', {}),
+        approved_mappings=mappings if mappings is not None else old.get('approved_mappings', {}) if previous else defaults,
+        reused_category_mappings=reused,
         # A replacement workbook is the whole expense source; never carry old
         # manual cell overrides or accumulate earlier deductions.
         corrections={},
@@ -118,12 +143,14 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
                 + ('; ' + ALIAS_REVIEW if alias_review else '')),
         previous_version_id=previous['id'] if previous else None,
         accept_cent_differences=accept_cent,
+        source_reconciliation='legacy' if accept_cent_differences is True else 'auto',
     )
     if policy_upgrade:options['reason']+='; New source format calculation policy; prior snapshots preserved'
     if parser_review:options['reason']+='; '+PARSER_REVIEW
-    if accept_cent:options['reason']+='; Administrator selected calculated AMOUNT plus SURCHARGE for DIST differences of at most KES 0.01; original source retained'
+    if previous and old.get('expense_parser_revision')!='structure-v4':options['reason']+='; Workbook structure validation refreshed; historical snapshots preserved'
+    if accept_cent and source_policy.get('version')=='monthly-expenses-v4-components-cent':options['reason']+='; Administrator selected calculated AMOUNT plus SURCHARGE for DIST differences of at most KES 0.01; original source retained'
     import hashlib
-    if previous and raw and old.get('source_verification') and same_raw and not old.get('corrections') and not alias_review and not parser_review and not policy_upgrade:
+    if previous and raw and old.get('expense_parser_revision')=='structure-v4' and old.get('source_verification') and same_raw and not old.get('corrections') and not alias_review and not parser_review and not policy_upgrade:
         _, fingerprint = _sources(conn, month)
         incoming = content if replacing else bytes(previous['source_content'])
         if (hashlib.sha256(incoming).hexdigest() == previous['file_sha256']
@@ -157,7 +184,7 @@ def state(conn, month):
         old = batch['decisions']
         from services.monthly_expense_persistence import policy_for_review
         policy_upgrade=batch['calculation_policy']!=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month,accept_cent_differences=old.get('accept_cent_differences',False))
-        if policy_upgrade or not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw) or _parser_review_needed(batch, raw):
+        if policy_upgrade or old.get('expense_parser_revision')!='structure-v4' or not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw) or _parser_review_needed(batch, raw):
             # GET is strictly read-only. Old drafts can display an automatic
             # preview; only a user upload/review/issue action appends a draft.
             batch = preview_import(conn, bytes(batch['source_content']), month, batch['uploader_id'],
@@ -166,6 +193,8 @@ def state(conn, month):
                 verified_no_activity=old.get('verified_no_activity', {}) if (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'] else {},
                 date_dispositions=old.get('date_dispositions', {}) if (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'] else {},
                 reason='Read-only calculation preview from saved workbooks',
+                source_reconciliation='auto',
+                reused_category_mappings=old.get('reused_category_mappings',{}),
                 accept_cent_differences=old.get('accept_cent_differences',False) if (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'] else False)
     if raw:
         from services.dhl_revenue_policy import payout_transport
@@ -181,6 +210,17 @@ def state(conn, month):
         metadata['cent_difference_review']=dict(accepted=accepted,rows=adjustments,
             migration_ready=conn.execute(text("SELECT to_regprocedure('dhl_component_cent_admin_fee(dhl_monthly_expense_rows,jsonb)') IS NOT NULL")).scalar_one(),
             calculated_gross=format(sum((Decimal(t['inclusive']) for t in scan['transactions']),Decimal('0.00')),'.2f') if checked else None)
+        from services.dhl_rounding_reconciliation import reconciled_transport
+        inclusive_scan=reconciled_transport(bytes(raw['content']),month)
+        using_inclusive=bool(batch and batch['decisions'].get('source_reconciliation_policy'))
+        inclusive_verified=using_inclusive and not validate_source(files.resolve_review(conn,files.reference(raw),month),
+            batch['decisions'].get('date_dispositions',{}),source,month,reconcile_source_rounding=True)
+        metadata['source_rounding_review']=dict(
+            rows=[i for i in inclusive_scan['issues'] if i['code']=='source_rounding_reconciled'] if inclusive_scan else [],
+            policy='source-inclusive-reconciled-v1',transaction_limit='0.01',truck_absolute_limit='0.05',month_absolute_limit='0.25',
+            migration_ready=conn.execute(text("SELECT to_regprocedure('dhl_inclusive_rounding_admin_fee(dhl_monthly_expense_rows,jsonb)') IS NOT NULL")).scalar_one(),
+            source_verified=bool(inclusive_verified),
+            gross=format(sum((Decimal(t['inclusive']) for t in inclusive_scan['transactions']),Decimal('0.00')),'.2f') if inclusive_verified else None)
     # Revenue-only trucks must remain visible; missing expense rows are not an
     # instruction to fabricate zero expenses or drop their revenue.
     from services.monthly_expense_persistence import _plate
@@ -200,7 +240,8 @@ def state(conn, month):
     for plate in sorted(source_plates - roster):
         records = [r for r in source if _plate(r['truck_plate']) == plate]
         accept_cent=bool(batch and batch['decisions'].get('accept_cent_differences'))
-        valid = bool(review and not validate_source(review, {}, source, month, target_plate=plate,accept_cent_differences=accept_cent))
+        inclusive=bool(batch and batch['decisions'].get('source_reconciliation_policy'))
+        valid = bool(review and not validate_source(review, {}, source, month, target_plate=plate,accept_cent_differences=accept_cent,reconcile_source_rounding=inclusive))
         gross = sum((money(r['distribution_cost']) + money(r['offloading_cost']) for r in records), Decimal('0.00')) if valid else None
         if valid and accept_cent:
             gross=sum((Decimal(t['inclusive']) for t in scan['transactions'] if t['plate']==plate),Decimal('0.00'))

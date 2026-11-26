@@ -156,7 +156,7 @@ class CentPersistenceTests(unittest.TestCase):
             for i,(k,v) in enumerate(manifest.items(),1000):conn.execute(text('INSERT INTO dhl_orders VALUES(:id,:ref,:date,:plate,:vehicle,:dist,:off,:gross)'),
                 dict(id=i,ref=k[2],date=k[0],plate=k[1],vehicle=100+plates.index(k[1]),dist=v[0],off=v[1],gross=sum(v)))
             before=self.legacy(conn);archive=payout.files.register(conn,raw,month,'september.xlsx',7)
-            old=payout.synchronize(conn,month,7,expected_report_id=None,expected_raw_id=archive['id'],content=net,filename='net.xlsx')
+            old=create_draft(conn,net,month,'net.xlsx',7,source_verification=payout.SYSTEM_REVIEW,historical_review=payout.files.reference(archive))
             revised=payout.synchronize(conn,month,7,expected_report_id=old['id'],expected_raw_id=archive['id'],accept_cent_differences=True)
             for plate in ['KAY025L','KBM439P','KBZ339V','KCE864K','KDL090S']:
                 r=next(r for r in revised['rows'] if r['normalized_plate']==plate)

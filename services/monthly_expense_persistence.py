@@ -15,7 +15,7 @@ import unicodedata
 from sqlalchemy import select, insert, update, text, func
 
 from services.monthly_expense_models import imports, rows
-from services.monthly_expense_parser import parse_expenses, OPTIONAL_CATEGORY, money, normalize_header
+from services.monthly_expense_parser import parse_expenses, OPTIONAL_CATEGORY, money, normalize_header, normalize_registration
 from services.monthly_expense_calculations import RevenueEvidence, RevenueStatus, calculate_monthly_expenses
 from services.monthly_expense_reconciliation import validate_reference_columns
 from services.monthly_expense_dates import validate_source
@@ -29,14 +29,20 @@ DHL_POLICY = dict(POLICY, version='monthly-expenses-v3-dist-admin', dhl_admin_ra
                   dhl_admin_base='DIST_including_surcharge_only', transport_policy='dist-surcharge-admin-v1')
 COMPONENT_POLICY = dict(DHL_POLICY,version='monthly-expenses-v4-components-cent',
     transport_policy='dist-components-cent-v1',source_cent_policy='amount_plus_surcharge_max_0.01_dist_only')
+INCLUSIVE_POLICY=dict(DHL_POLICY,version='monthly-expenses-v5-source-inclusive',
+    transport_policy='source-inclusive-reconciled-v1',source_cent_policy='corroborated_inclusive_unchanged',
+    transaction_tolerance='0.01',truck_absolute_cap='0.05',month_absolute_cap='0.25')
 
 def supported_policy(policy):
-    return policy in (POLICY, DHL_POLICY, COMPONENT_POLICY)
+    return policy in (POLICY, DHL_POLICY, COMPONENT_POLICY,INCLUSIVE_POLICY)
 
-def policy_for_review(review, month, *, accept_cent_differences=False):
+def policy_for_review(review, month, *, accept_cent_differences=False,source_reconciliation='auto'):
     from services.dhl_revenue_policy import inspect_transport
     import base64
     if review and review.get('source_content_base64') and inspect_transport(base64.b64decode(review['source_content_base64'],validate=True),month):
+        if source_reconciliation!='legacy':
+            from services.dhl_rounding_reconciliation import reconciled_transport,POLICY as RECONCILED
+            if reconciled_transport(base64.b64decode(review['source_content_base64'],validate=True),month)['policy']==RECONCILED:return INCLUSIVE_POLICY
         return COMPONENT_POLICY if accept_cent_differences else DHL_POLICY
     return POLICY
 
@@ -60,7 +66,7 @@ class DuplicateUpload(ValueError):
 
 
 def _plate(value):
-    return ''.join(unicodedata.normalize('NFKC', value or '').split()).upper()
+    return normalize_registration(value)
 
 
 def _hash(value):
@@ -107,6 +113,11 @@ def _build(conn, content, month, decisions, actor, audit_time):
     accept_cent=decisions.get('accept_cent_differences',False)
     transport=payout_transport(base64.b64decode(source_review['source_content_base64'],validate=True),month,accept_cent_differences=accept_cent) if source_review and source_review.get('source_content_base64') else None
     policy=(COMPONENT_POLICY if accept_cent else DHL_POLICY) if transport else POLICY
+    inclusive=decisions.get('source_reconciliation_policy')=='source-inclusive-reconciled-v1'
+    if inclusive and transport:
+        from services.dhl_rounding_reconciliation import reconciled_transport
+        transport=reconciled_transport(base64.b64decode(source_review['source_content_base64'],validate=True),month)
+        policy=INCLUSIVE_POLICY
     archived_review = bool((decisions.get('historical_review') or {}).get('archive_id'))
     # Read-only legacy identity lookup. No ORM relationships or payout services.
     vehicles = list(conn.execute(text('''SELECT v.id, v.plate_number, v.owner_id, v.size,
@@ -117,6 +128,11 @@ def _build(conn, content, month, decisions, actor, audit_time):
     header_mappings = [dict(asdict(h), approved_by=actor if h.approval_source == 'administrator' else None,
                             approved_at=audit_time if h.approval_source == 'administrator' else None)
                        for h in preview.headers]
+    from services.monthly_expense_parser import header_identity
+    for header in header_mappings:
+        prior=decisions.get('reused_category_mappings',{}).get(header_identity(header['normalized_header']))
+        if prior and header['approval_source']=='administrator' and header['classification']=='expense' and prior['label']==header['label'] and prior['category']==header['category']:
+            header.update(approval_source='reused_approval',approved_by=prior['approved_by'],approved_at=prior['approved_at'],approval_import_id=prior['import_id'])
     payloads = []
     for row in preview.rows:
         issues = [asdict(i) for i in row.issues]
@@ -124,13 +140,19 @@ def _build(conn, content, month, decisions, actor, audit_time):
             issues.append(dict(code='possible_admin_fee_overlap',message='An approved expense header mentions admin; review possible overlap with the separately calculated administration fee.',cell=None,blocking=True))
         matches = [dict(v) for v in vehicles if _plate(v['plate_number']) == row.plate]
         vehicle = matches[0] if len(matches) == 1 else {}
+        if row.owner_name:
+            vehicle=dict(vehicle,registered_owner_name=vehicle.get('owner_name'),workbook_owner_name=row.owner_name)
+            if vehicle.get('owner_name') and normalize_header(vehicle['owner_name'])!=normalize_header(row.owner_name):
+                issues.append(dict(code='owner_name_reference_difference',message='Workbook owner name differs from the vehicle register; verify the displayed workbook name before issuing.',cell=None,blocking=False))
+            vehicle['owner_name']=row.owner_name
         if len(matches) != 1:
             issues.append({'code': 'vehicle_unmatched' if not matches else 'vehicle_ambiguous',
                            'message': 'Explicit vehicle matching required', 'cell': None, 'blocking': True})
         records = [item for item in source if _plate(item['truck_plate']) == row.plate]
         reason = proofs.get(row.plate, '')
         verification = decisions['source_verification']
-        if archived_review and validate_source(source_review, decisions.get('date_dispositions', {}), source, month, target_plate=row.plate,accept_cent_differences=accept_cent):
+        source_issues=validate_source(source_review, decisions.get('date_dispositions', {}), source, month, target_plate=row.plate,accept_cent_differences=accept_cent,reconcile_source_rounding=inclusive) if archived_review else []
+        if source_issues:
             verification = ''
         if reason and records:
             issues.append({'code': 'no_activity_conflict', 'message': 'DHL records exist for a no-activity claim',
@@ -166,6 +188,8 @@ def _build(conn, content, month, decisions, actor, audit_time):
             audit[cell] = dict(value)
             if 'approved_correction' in value:
                 audit[cell].update(approved_by=actor, approved_at=audit_time, reason=decisions['reason'])
+        if row.owner_name or row.continuation_rows:
+            audit['_expense_layout']=dict(owner_name=row.owner_name,continuation_rows=row.continuation_rows,continuation_sources={str(k):v for k,v in row.continuation_sources.items()},primary_row=row.row_number)
         admin=Decimal('0.00')
         if transport:
             snapshot=truck_snapshot(transport,row.plate,month)
@@ -188,6 +212,14 @@ def _build(conn, content, month, decisions, actor, audit_time):
             if not result.ready:
                 issues.append({'code': 'revenue_unverified', 'message': 'DHL completeness or no-activity verification required',
                                'cell': None, 'blocking': True})
+        if decisions.get('expense_parser_revision')=='structure-v4' and row.ready and gross is None and records and source_issues and all(i['code']=='inclusive_amount_mismatch' for i in source_issues):
+            # These numbers are reliable arithmetic on the retained source,
+            # not verified/approved financial columns. Never used by PDFs.
+            proposed_gross=sum((money(item['total_revenue']) for item in records),Decimal('0.00'))
+            proposed=calculate_monthly_expenses(row,month,RevenueEvidence(row.plate,month,RevenueStatus.DHL_RECORDS,
+                proposed_gross,'Provisional source arithmetic only; source review unresolved',admin))
+            audit['_provisional_financial']={k:format(getattr(proposed,k),'.2f') for k in financial}
+            audit['_provisional_financial'].update(dhl_admin_fee=format(admin,'.2f'),basis='source_inclusive_pending_review')
         if not row.ready:
             issues.append({'code': 'preview_unresolved', 'message': 'Resolve workbook/header/cell validation',
                            'cell': None, 'blocking': True})
@@ -197,7 +229,7 @@ def _build(conn, content, month, decisions, actor, audit_time):
                              deductions=deductions, cell_audit=audit, dhl_source_snapshot=records,
                              revenue_status=status.value, revenue_evidence=evidence, issues=issues, **financial))
     batch_issues = [asdict(i) for i in preview.issues]
-    batch_issues += validate_source(source_review, decisions.get('date_dispositions', {}), source, month,accept_cent_differences=accept_cent)
+    batch_issues += validate_source(source_review, decisions.get('date_dispositions', {}), source, month,accept_cent_differences=accept_cent,reconcile_source_rounding=inclusive)
     if not decisions['source_verification']:
         batch_issues.append({'code': 'source_unverified', 'message': 'Month completeness verification required',
                              'cell': None, 'blocking': True})
@@ -216,7 +248,7 @@ def _column(number):
 
 def _prepare_decisions(approved_mappings=None, corrections=None, verified_no_activity=None,
                        source_verification='', reason='', sheet_name=None,
-                       reference_columns=None, reference_verification='', historical_review=None, date_dispositions=None,accept_cent_differences=False):
+                       reference_columns=None, reference_verification='', historical_review=None, date_dispositions=None,accept_cent_differences=False,source_reconciliation_policy=None,reused_category_mappings=None):
     proofs = {}
     for plate, evidence in (verified_no_activity or {}).items():
         key = _plate(plate)
@@ -239,13 +271,30 @@ def _prepare_decisions(approved_mappings=None, corrections=None, verified_no_act
     if accept_cent_differences:
         if not reason.strip():raise ValueError('Cent policy requires an audit reason')
         decisions['accept_cent_differences']=True
+    if source_reconciliation_policy is not None:
+        if source_reconciliation_policy!='source-inclusive-reconciled-v1':raise ValueError('Unsupported source reconciliation policy')
+        decisions['source_reconciliation_policy']=source_reconciliation_policy
+        decisions.pop('accept_cent_differences',None)
+    if reused_category_mappings:decisions['reused_category_mappings']=dict(reused_category_mappings)
+    return decisions
+
+
+def _new_source_decisions(conn,month,decisions,mode='auto'):
+    """Versioned new-import policy; rebuilding old decisions remains unchanged."""
+    if mode not in {'auto','legacy'}:raise ValueError('Invalid source reconciliation mode')
+    decisions=dict(decisions,expense_parser_revision='structure-v4')
+    from services.monthly_files import resolve_review
+    review=resolve_review(conn,decisions.get('historical_review'),month)
+    if mode=='auto' and policy_for_review(review,month)==INCLUSIVE_POLICY:
+        decisions=dict(decisions,source_reconciliation_policy='source-inclusive-reconciled-v1')
+        decisions.pop('accept_cent_differences',None)
     return decisions
 
 
 def create_draft(conn, content: bytes, month: date, filename: str, uploader_id: int, *,
                  approved_mappings=None, corrections=None, verified_no_activity=None,
                  source_verification='', reason='', previous_version_id=None, sheet_name=None,
-                 reference_columns=None, reference_verification='', historical_review=None, date_dispositions=None,accept_cent_differences=False):
+                 reference_columns=None, reference_verification='', historical_review=None, date_dispositions=None,accept_cent_differences=False,source_reconciliation='legacy',reused_category_mappings=None):
     if month.day != 1 or uploader_id <= 0:
         raise ValueError('Explicit month and valid uploader required')
     if (approved_mappings or corrections or previous_version_id is not None) and not reason.strip():
@@ -262,7 +311,10 @@ def create_draft(conn, content: bytes, month: date, filename: str, uploader_id: 
         if predecessor is None or predecessor['reporting_month'] != month:
             raise ValueError('Previous version must belong to this month')
     decisions = _prepare_decisions(approved_mappings, corrections, verified_no_activity,
-        source_verification, reason, sheet_name, reference_columns, reference_verification, historical_review, date_dispositions,accept_cent_differences)
+        source_verification, reason, sheet_name, reference_columns, reference_verification, historical_review, date_dispositions,accept_cent_differences,reused_category_mappings=reused_category_mappings)
+    decisions=_new_source_decisions(conn,month,decisions,source_reconciliation)
+    if decisions.get('source_reconciliation_policy') and not conn.execute(text("SELECT to_regprocedure('dhl_inclusive_rounding_admin_fee(dhl_monthly_expense_rows,jsonb)') IS NOT NULL")).scalar_one():
+        raise VersionConflict('Source-inclusive reconciliation requires migration 008 before saving a new report version.')
     now = datetime.now(timezone.utc)
     batch, payloads, fingerprint = _build(conn, content, month, decisions, uploader_id, now.isoformat())
     decisions_sha = _hash(decisions)
@@ -291,7 +343,8 @@ def preview_import(conn, content, month, actor_id, **options):
     if (options.get('approved_mappings') or options.get('corrections')) and not options.get('reason', '').strip():
         raise ValueError('Mapping/correction decisions require an audit reason')
     options.pop('previous_version_id', None)
-    decisions = _prepare_decisions(**options)
+    mode=options.pop('source_reconciliation','legacy')
+    decisions = _new_source_decisions(conn,month,_prepare_decisions(**options),mode)
     now = datetime.now(timezone.utc)
     batch, payloads, fingerprint = _build(conn, content, month, decisions, actor_id, now.isoformat())
     return dict(reporting_month=month, version=None, status='preview', decisions=decisions,
