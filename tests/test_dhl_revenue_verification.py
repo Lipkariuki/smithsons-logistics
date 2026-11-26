@@ -23,10 +23,10 @@ class DHLRevenueVerificationTests(unittest.TestCase):
   self.assertEqual(self.result['totals']['gross'],'9858161.63')
   for row in self.result['rows']:
    self.assertEqual(Decimal(row['gross']),Decimal(row['dist'])+Decimal(row['offloading']))
- def test_existing_reporting_reconciliation_payslip_and_new_source_agree_per_truck(self):
+ def test_existing_reporting_reconciliation_and_current_statement_source_agree_per_truck(self):
   self.assertEqual(self.result['nonzero_cent_differences'],[])
   self.assertEqual(self.result['truck_count'],25)
-  for key in ['importer_gross','report_gross','reconciliation_gross','payslip_gross','monthly_expense_gross']:
+  for key in ['importer_gross','report_gross','reconciliation_gross','monthly_expense_gross']:
    self.assertEqual(self.result['totals'][key],self.result['totals']['gross'])
  def test_admin_is_separate_audit_not_gross_deduction(self):
   self.assertEqual(len(self.result['admin_rows']),26)

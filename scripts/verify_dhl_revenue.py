@@ -63,7 +63,6 @@ with safe.SessionLocal() as db:
  args=dict(owner_id=None,vehicle_id=None,vehicle_plate=None,start_date=MONTH,end_date=END,db=db,current_user=None)
  legacy={r.plate_number:r for r in dhl_reports.dhl_summary(**args)}
  reconciliation={r.plate_number:r for r in dhl_reports.dhl_reconciliation(**args).rows}
- payslip_gross={p:dhl_reports._sum_dhl_revenue(db,v.id,MONTH,END) for p,v in vehicles.items()}
 # Actual monthly-source query against local tables; SQLite lacks PostgreSQL SHARE lock.
 # Skip only that lock statement; real SELECT, bounds, snapshot formatting and hashing run.
 class ReadConnection:
@@ -83,9 +82,9 @@ for r in parsed:
 rows=[]
 for p,v in sorted(independent.items()):
  gross=q(v['dist']+v['offloading']);r=legacy[p]
- item=dict(truck=p,dist=q(v['dist']),offloading=q(v['offloading']),gross=gross,admin_audit_only=q(v['admin']),admin_rows=v['admin_rows'],importer_dist=q(imported[p]['dist']),importer_offloading=q(imported[p]['offloading']),importer_gross=q(imported[p]['gross']),report_gross=q(Decimal(str(r.total_revenue))),reconciliation_gross=q(Decimal(str(reconciliation[p].dhl_revenue))),payslip_gross=q(Decimal(str(payslip_gross[p]))),monthly_expense_gross=q(monthly[p]))
+ item=dict(truck=p,dist=q(v['dist']),offloading=q(v['offloading']),gross=gross,admin_audit_only=q(v['admin']),admin_rows=v['admin_rows'],importer_dist=q(imported[p]['dist']),importer_offloading=q(imported[p]['offloading']),importer_gross=q(imported[p]['gross']),report_gross=q(Decimal(str(r.total_revenue))),reconciliation_gross=q(Decimal(str(reconciliation[p].dhl_revenue))),monthly_expense_gross=q(monthly[p]))
  for key in ['importer_dist','importer_offloading']:item[key+'_difference']=item[key]-item[key.removeprefix('importer_')]
- for key in ['importer_gross','report_gross','reconciliation_gross','payslip_gross','monthly_expense_gross']:item[key+'_difference']=item[key]-gross
+ for key in ['importer_gross','report_gross','reconciliation_gross','monthly_expense_gross']:item[key+'_difference']=item[key]-gross
  item['raw_float_report_difference']=str(Decimal(str(r.total_revenue))-gross)
  rows.append(item)
 # Focused isolated fixtures prove charge handling with conflicting RATE/QTY and negative Admin.
@@ -100,7 +99,7 @@ synthetic_admin_only=fixture([('Admin',-9999)])
 w=Workbook();s=w.active;s.append([None,'FEBRUARY 2026 NET SUMMARY']);s.append(['TRUCK REG/NO','FUEL','DIST','Offloading','Admin']);s.append(['SYN123A',100,999,888,-777]);b=io.BytesIO();w.save(b);w.close();unknown=parse_expenses(b.getvalue(),MONTH)
 ignored=parse_expenses(b.getvalue(),MONTH,approved_mappings={'DIST':None,'Offloading':None,'Admin':None})
 calc=calculate_monthly_expenses(ignored.rows[0],MONTH,RevenueEvidence('SYN123A',MONTH,RevenueStatus.DHL_RECORDS,Decimal('1000.00'),'Synthetic fixture only'))
-result=dict(full_original_import_error=full_import_error,month_source_rows=len(monthrows),historical=historical,admin_rows=admin,truck_count=len(rows),totals={key:str(sum((r[key] for r in rows),Decimal(0))) for key in ['dist','offloading','gross','admin_audit_only','importer_gross','report_gross','reconciliation_gross','payslip_gross','monthly_expense_gross']},nonzero_cent_differences=[{k:str(v) for k,v in r.items()} for r in rows if any(r[k]!=0 for k in r if k.endswith('_difference') and k!='raw_float_report_difference')],synthetic=synthetic,synthetic_admin_only=synthetic_admin_only,unknown_headers={h.original_header:h.classification for h in unknown.headers},unknown_deductions={k:str(v) for k,v in unknown.rows[0].expenses.items()},ignored_deductions={k:str(v) for k,v in ignored.rows[0].expenses.items()},synthetic_calculation={k:str(getattr(calc,k)) for k in ['gross','operating_expenses','commission_base','commission','net_payable']},source_fingerprint=fingerprint,rows=rows)
+result=dict(full_original_import_error=full_import_error,month_source_rows=len(monthrows),historical=historical,admin_rows=admin,truck_count=len(rows),totals={key:str(sum((r[key] for r in rows),Decimal(0))) for key in ['dist','offloading','gross','admin_audit_only','importer_gross','report_gross','reconciliation_gross','monthly_expense_gross']},nonzero_cent_differences=[{k:str(v) for k,v in r.items()} for r in rows if any(r[k]!=0 for k in r if k.endswith('_difference') and k!='raw_float_report_difference')],synthetic=synthetic,synthetic_admin_only=synthetic_admin_only,unknown_headers={h.original_header:h.classification for h in unknown.headers},unknown_deductions={k:str(v) for k,v in unknown.rows[0].expenses.items()},ignored_deductions={k:str(v) for k,v in ignored.rows[0].expenses.items()},synthetic_calculation={k:str(getattr(calc,k)) for k in ['gross','operating_expenses','commission_base','commission','net_payable']},source_fingerprint=fingerprint,rows=rows)
 if '--json' in sys.argv:print(json.dumps(result,default=str));sys.exit()
 out=ROOT/'output/dhl-revenue-verification';out.mkdir(exist_ok=True,parents=True)
 (out/'verification.json').write_text(json.dumps(result,indent=2,default=str))

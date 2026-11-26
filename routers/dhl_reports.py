@@ -16,10 +16,7 @@ from database import get_db
 from models import (
     DHLOrder,
     DHLPayslip,
-    DHLPayslipExpense,
     DHLPayslipDocument,
-    Expense,
-    FuelExpense,
     Order,
     Trip,
     User,
@@ -58,11 +55,6 @@ def _date_bounds(start: date, end: date) -> tuple[datetime, datetime]:
     return start_dt, end_dt
 
 
-def _looks_like_fuel(description: Optional[str]) -> bool:
-    if not description:
-        return False
-    lower = description.lower()
-    return "fuel" in lower or "diesel" in lower or "petrol" in lower
 
 
 def _format_currency(value: float) -> str:
@@ -77,57 +69,8 @@ def _latin1(text: Optional[str]) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
-def _compute_default_expenses(db: Session, vehicle_id: int, start: date, end: date) -> list[dict]:
-    start_dt, end_dt = _date_bounds(start, end)
-
-    fuel_total = (
-        db.query(func.coalesce(func.sum(FuelExpense.amount), 0.0))
-        .join(Trip, FuelExpense.trip_id == Trip.id)
-        .outerjoin(Order, Trip.order_id == Order.id)
-        .filter(
-            Trip.vehicle_id == vehicle_id,
-            or_(
-                and_(Order.date >= start_dt, Order.date < end_dt),
-                and_(Order.id.is_(None), Trip.created_at >= start_dt, Trip.created_at < end_dt),
-            ),
-        )
-        .scalar()
-        or 0.0
-    )
-
-    expense_rows = (
-        db.query(Expense.amount, Expense.description)
-        .join(Trip, Expense.trip_id == Trip.id)
-        .outerjoin(Order, Trip.order_id == Order.id)
-        .filter(
-            Trip.vehicle_id == vehicle_id,
-            Expense.is_deleted.is_(False),
-            or_(
-                and_(Order.date >= start_dt, Order.date < end_dt),
-                and_(Order.id.is_(None), Trip.created_at >= start_dt, Trip.created_at < end_dt),
-            ),
-        )
-        .all()
-    )
-    other_total = sum(float(amount or 0.0) for amount, desc in expense_rows if not _looks_like_fuel(desc))
-
-    return [
-        {"name": "Fuel", "amount": float(fuel_total or 0.0)},
-        {"name": "Trip Expenses", "amount": float(other_total or 0.0)},
-    ]
 
 
-def _sum_dhl_revenue(db: Session, vehicle_id: int, start: date, end: date) -> float:
-    total = (
-        db.query(func.coalesce(func.sum(DHLOrder.total_revenue), 0.0))
-        .filter(
-            DHLOrder.vehicle_id == vehicle_id,
-            DHLOrder.date >= start,
-            DHLOrder.date <= end,
-        )
-        .scalar()
-    )
-    return float(total or 0.0)
 
 
 def _normalize_plate(value: Optional[str]) -> str:
@@ -662,57 +605,7 @@ def create_payslip(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    start, end = _default_dates(payload.period_start, payload.period_end)
-    vehicle = db.query(Vehicle).options(joinedload(Vehicle.owner)).filter(Vehicle.id == payload.vehicle_id).first()
-    if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
-
-    revenue = _sum_dhl_revenue(db, payload.vehicle_id, start, end)
-    if revenue <= 0:
-        raise HTTPException(status_code=404, detail="No DHL revenue found for the selected period")
-
-    commission_rate = payload.commission_rate if payload.commission_rate is not None else 0.07
-    commission_amount = revenue * commission_rate
-
-    expenses = payload.expenses or _compute_default_expenses(db, payload.vehicle_id, start, end)
-    total_expenses = sum(float(item.amount) if hasattr(item, "amount") else float(item["amount"]) for item in expenses)
-    net_pay = revenue - commission_amount - total_expenses
-
-    payslip = db.query(DHLPayslip).filter(
-        DHLPayslip.vehicle_id == payload.vehicle_id,
-        DHLPayslip.period_start == start,
-        DHLPayslip.period_end == end,
-    ).first()
-
-    if payslip is None:
-        payslip = DHLPayslip(
-            vehicle_id=payload.vehicle_id,
-            period_start=start,
-            period_end=end,
-            total_revenue=revenue,
-            commission_rate=commission_rate,
-            commission_amount=commission_amount,
-            total_expenses=total_expenses,
-            net_pay=net_pay,
-        )
-        db.add(payslip)
-        db.flush()
-    else:
-        payslip.total_revenue = revenue
-        payslip.commission_rate = commission_rate
-        payslip.commission_amount = commission_amount
-        payslip.total_expenses = total_expenses
-        payslip.net_pay = net_pay
-        payslip.expenses.clear()
-
-    for item in expenses:
-        name = item.name if hasattr(item, "name") else item["name"]
-        amount = item.amount if hasattr(item, "amount") else item["amount"]
-        payslip.expenses.append(DHLPayslipExpense(name=name, amount=amount))
-
-    db.commit()
-    db.refresh(payslip)
-    return payslip
+    raise HTTPException(status_code=410, detail="Legacy manual DHL payslips are retired. Use DHL Monthly Payouts to confirm and download a workbook-based statement.")
 
 
 @router.get("/payslips", response_model=list[DHLPayslipOut])
@@ -769,31 +662,7 @@ def update_payslip(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    payslip = (
-        db.query(DHLPayslip)
-        .options(joinedload(DHLPayslip.expenses))
-        .filter(DHLPayslip.id == payslip_id)
-        .first()
-    )
-    if not payslip:
-        raise HTTPException(status_code=404, detail="Payslip not found")
-
-    if payload.commission_rate is not None:
-        payslip.commission_rate = payload.commission_rate
-
-    if payload.expenses is not None:
-        payslip.expenses.clear()
-        for item in payload.expenses:
-            payslip.expenses.append(DHLPayslipExpense(name=item.name, amount=item.amount))
-
-    payslip.commission_amount = payslip.total_revenue * payslip.commission_rate
-    payslip.total_expenses = sum(item.amount for item in payslip.expenses)
-    payslip.net_pay = payslip.total_revenue - payslip.commission_amount - payslip.total_expenses
-    if payslip.document:
-        payslip.document.pdf_bytes = _generate_payslip_pdf(payslip, payslip.vehicle)
-    db.commit()
-    db.refresh(payslip)
-    return payslip
+    raise HTTPException(status_code=410, detail="Legacy manual DHL payslips are retired. Use DHL Monthly Payouts to confirm and download a workbook-based statement.")
 
 
 @router.get("/payslips/{payslip_id}/pdf")

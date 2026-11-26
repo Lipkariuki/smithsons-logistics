@@ -164,8 +164,9 @@ class CentPersistenceTests(unittest.TestCase):
                 confirm_truck(conn,r['id'],7,'Synthetic local cent-policy review only')
                 doc=create_document(conn,r['id'],7)
                 self.assertEqual(bytes(get_document(conn,doc['id'])['pdf_content']),bytes(doc['pdf_content']))
-            self.assertEqual(sum(r['gross'] is None for r in revised['rows']),12)
-            with self.assertRaises(ValidationBlocked):confirm_import(conn,revised['id'],7)
+            self.assertEqual(sum(r['gross'] is None for r in revised['rows']),0)
+            self.assertEqual(sum(r['revenue_status']=='verified_no_activity' for r in revised['rows']),12)
+            self.assertEqual(conn.execute(text('SELECT count(*) FROM dhl_monthly_truck_confirmations')).scalar_one(),5)
             self.assertEqual(get_import(conn,old['id']),old)
             self.assertEqual(self.legacy(conn),before)
 

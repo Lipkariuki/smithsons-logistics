@@ -145,7 +145,10 @@ class ReliabilityPersistenceTests(unittest.TestCase):
             self.assertEqual(preview['status'],'preview');self.assertEqual(preview['calculation_policy'],INCLUSIVE_POLICY)
             self.assertEqual(get_import(conn,old['id']),old)
             batch=payout.synchronize(conn,month,7,expected_report_id=old['id'],expected_raw_id=archive['id'])
-            self.assertEqual(sum(r['gross'] is None for r in batch['rows']),12)
+            self.assertEqual(sum(r['gross'] is None for r in batch['rows']),0)
+            inactive=[r for r in batch['rows'] if r['revenue_status']=='verified_no_activity']
+            self.assertEqual(len(inactive),12)
+            self.assertEqual(sum(r['net_payable'] for r in inactive),Decimal('-26148.00'))
             self.assertEqual(batch['calculation_policy'],INCLUSIVE_POLICY)
             for plate,gross,net_value in [('KAY025L','201891.81','101630.52'),('KBM439P','352170.34','164530.81'),('KBZ339V','333727.80','126058.16'),('KCE864K','303030.02','120464.43'),('KDL090S','297953.84','91007.70')]:
                 row=next(r for r in batch['rows'] if r['normalized_plate']==plate)
@@ -158,7 +161,35 @@ class ReliabilityPersistenceTests(unittest.TestCase):
             self.assertEqual(self.legacy(conn),before)
             self.assertEqual(payout.files.get(conn,archive['id'])['content'],raw)
             self.assertEqual(get_import(conn,old['id']),old)
-            with self.assertRaises(ValidationBlocked):confirm_import(conn,batch['id'],7)
+            self.assertEqual(conn.execute(text('SELECT count(*) FROM dhl_monthly_truck_confirmations')).scalar_one(),5)
+
+    def test_source_supported_zero_activity_and_duplicate_pdf_are_safe(self):
+        with self.engine.begin() as conn,reporting_read_scope():
+            conn.execute(text("INSERT INTO vehicles VALUES(2,'ZERO999A',7,'30T')"))
+            before=self.legacy(conn)
+            archive=payout.files.register(conn,fixture.raw_book(conn),fixture.MONTH,'raw.xlsx',7)
+            batch=payout.synchronize(conn,fixture.MONTH,7,expected_report_id=None,expected_raw_id=archive['id'],
+                content=net(['Truck','Fuel'],[['KAA123B',20],['ZERO999A',50]],title='FEBRUARY 2026 NET SUMMARY'),filename='net.xlsx')
+            zero=next(r for r in batch['rows'] if r['normalized_plate']=='ZERO999A')
+            self.assertEqual((zero['gross'],zero['operating_expenses'],zero['commission'],zero['net_payable']),
+                (Decimal('0'),Decimal('50'),Decimal('0'),Decimal('-50')))
+            approval=confirm_truck(conn,zero['id'],7,'Synthetic zero-activity test')
+            self.assertEqual(confirm_truck(conn,zero['id'],7,'Repeated click')['id'],approval['id'])
+            doc=create_document(conn,zero['id'],7)
+            self.assertEqual(create_document(conn,zero['id'],7)['id'],doc['id'])
+            self.assertEqual(self.legacy(conn),before)
+
+    def test_missing_source_rows_do_not_establish_zero_activity(self):
+        from openpyxl import load_workbook
+        with self.engine.begin() as conn,reporting_read_scope():
+            conn.execute(text("INSERT INTO vehicles VALUES(2,'ZERO999A',7,'30T')"))
+            raw=load_workbook(io.BytesIO(fixture.raw_book(conn)));raw.active.append([date(2026,2,10),'MISSING999','NOLEDGER','DIST',100])
+            data=io.BytesIO();raw.save(data);raw.close()
+            archive=payout.files.register(conn,data.getvalue(),fixture.MONTH,'incomplete.xlsx',7)
+            batch=payout.synchronize(conn,fixture.MONTH,7,expected_report_id=None,expected_raw_id=archive['id'],
+                content=net(['Truck','Fuel'],[['ZERO999A',50]],title='FEBRUARY 2026 NET SUMMARY'),filename='net.xlsx')
+            self.assertIsNone(batch['rows'][0]['gross'])
+            self.assertFalse(batch['decisions']['verified_no_activity'])
 
 
 if __name__=='__main__':unittest.main()

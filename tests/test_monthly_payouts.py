@@ -213,7 +213,10 @@ class SimplePayoutTests(unittest.TestCase):
                 document=create_document(conn,eligible['id'],7)
             self.assertTrue(bytes(document['pdf_content']).startswith(b'%PDF'))
             self.assertEqual(bytes(get_document(conn,document['id'])['pdf_content']),bytes(document['pdf_content']))
-            self.assertTrue(any(r['gross'] is None for r in revised['rows']))
+            if has_trailer:self.assertTrue(any(r['gross'] is None for r in revised['rows']))
+            else:
+                self.assertTrue(all(r['gross'] is not None for r in revised['rows']))
+                self.assertEqual(sum(r['revenue_status']=='verified_no_activity' for r in revised['rows']),12)
             self.assertEqual(conn.execute(text('SELECT count(*) FROM dhl_monthly_truck_confirmations')).scalar_one(),1)
             self.assertEqual(get_import(conn,old['id']),old)
             self.assertEqual(self.legacy(conn),before)

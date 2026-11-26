@@ -6,6 +6,7 @@ Only append financial drafts; confirmation is still an explicit separate action.
 from sqlalchemy import select, text
 from services import monthly_files as files
 from services.monthly_expense_models import imports
+from services.monthly_reporting_scope import reporting_read_scope
 from services.monthly_expense_persistence import (
     _lock, _sources, create_draft, preview_import, get_import, DuplicateUpload, VersionConflict,
 )
@@ -93,6 +94,36 @@ def _approved_expense_defaults(conn):
             {k:v for k,v in provenance.items() if len(categories[k])==1})
 
 
+@reporting_read_scope()
+def _activity_defaults(conn, month, raw, content, mappings, dispositions, proofs, plates=None):
+    """Evidence of absence in a complete retained source, never a human approval.
+
+    No source file, unmatched ledger rows or unresolved dates cannot prove zero.
+    A financial error on a different truck does not invent activity here.
+    """
+    # Mechanical absence evidence must be re-established against the current
+    # ledger on every request; an old proof cannot conceal a later missing row.
+    result={p:r for p,r in proofs.items() if not r.startswith('No DHL trips: complete saved workbook ')}
+    if not raw:return result
+    from services.monthly_expense_dates import validate_source
+    from services.monthly_expense_parser import parse_expenses,normalize_registration
+    source,_=_sources(conn,month)
+    if not source:return result
+    review=files.resolve_review(conn,files.reference(raw),month)
+    problems=validate_source(review,dispositions,source,month,reconcile_source_rounding=True)
+    completeness={'source_manifest_mismatch','source_gross_inconsistent','out_of_period_date',
+        'invalid_source_date','missing_source_date','invalid_source_identity','invalid_source_amount'}
+    if any(i['code'] in completeness for i in problems):return result
+    active={normalize_registration(r['truck_plate']) for r in source}
+    if plates is None:plates=[r.plate for r in parse_expenses(content,month,approved_mappings=mappings).rows]
+    for plate in plates:
+        if plate in active or plate in result:continue
+        if validate_source(review,dispositions,source,month,target_plate=plate,reconcile_source_rounding=True):continue
+        result[plate]=('No DHL trips: complete saved workbook '+raw['content_sha256']+
+            ' reconciles with the monthly DHL ledger; no transport rows for '+plate+'.')
+    return result
+
+
 def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
                 content=None, filename=None, mappings=None, no_activity=None,accept_cent_differences=None):
     """Idempotent autosave; never mutate a previous snapshot or issue a PDF.
@@ -145,6 +176,10 @@ def synchronize(conn, month, actor, *, expected_report_id, expected_raw_id,
         accept_cent_differences=accept_cent,
         source_reconciliation='legacy' if accept_cent_differences is True else 'auto',
     )
+    options['verified_no_activity']=_activity_defaults(conn,month,raw,
+        content if replacing else bytes(previous['source_content']),options['approved_mappings'],
+        options['date_dispositions'],options['verified_no_activity'],
+        [r['normalized_plate'] for r in previous['rows']] if previous and not replacing else None)
     if policy_upgrade:options['reason']+='; New source format calculation policy; prior snapshots preserved'
     if parser_review:options['reason']+='; '+PARSER_REVIEW
     if previous and old.get('expense_parser_revision')!='structure-v4':options['reason']+='; Workbook structure validation refreshed; historical snapshots preserved'
@@ -182,15 +217,18 @@ def state(conn, month):
     if batch and raw and batch['status'] == 'draft':
         _, fingerprint = _sources(conn, month)
         old = batch['decisions']
+        proofs=_activity_defaults(conn,month,raw,bytes(batch['source_content']),old.get('approved_mappings',{}),
+            old.get('date_dispositions',{}),old.get('verified_no_activity',{}) if (old.get('historical_review') or {}).get('sha256')==raw['content_sha256'] else {},
+            [r['normalized_plate'] for r in batch['rows']])
         from services.monthly_expense_persistence import policy_for_review
         policy_upgrade=batch['calculation_policy']!=policy_for_review(files.resolve_review(conn,files.reference(raw),month),month,accept_cent_differences=old.get('accept_cent_differences',False))
-        if policy_upgrade or old.get('expense_parser_revision')!='structure-v4' or not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw) or _parser_review_needed(batch, raw):
+        if proofs!=old.get('verified_no_activity',{}) or policy_upgrade or old.get('expense_parser_revision')!='structure-v4' or not old.get('source_verification') or (old.get('historical_review') or {}).get('sha256') != raw['content_sha256'] or fingerprint != batch['dhl_source_fingerprint'] or old.get('corrections') or _alias_review_needed(batch, raw) or _parser_review_needed(batch, raw):
             # GET is strictly read-only. Old drafts can display an automatic
             # preview; only a user upload/review/issue action appends a draft.
             batch = preview_import(conn, bytes(batch['source_content']), month, batch['uploader_id'],
                 approved_mappings=old.get('approved_mappings', {}), corrections={},
                 source_verification=SYSTEM_REVIEW, historical_review=files.reference(raw),
-                verified_no_activity=old.get('verified_no_activity', {}) if (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'] else {},
+                verified_no_activity=proofs,
                 date_dispositions=old.get('date_dispositions', {}) if (old.get('historical_review') or {}).get('sha256') == raw['content_sha256'] else {},
                 reason='Read-only calculation preview from saved workbooks',
                 source_reconciliation='auto',
